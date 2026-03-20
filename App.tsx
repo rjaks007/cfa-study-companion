@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { MetricCard, MiniStat } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
@@ -17,12 +17,22 @@ export default function App() {
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const study = useStudyCompanion();
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab);
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
   }, [study.studyState.startDate]);
+
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   function openWeeklyForSubject(subject: Subject) {
     study.setSelectedSubject(subject);
@@ -56,9 +66,14 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.flex}>
-          <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.screen}
+            contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
             {activeTab === "overview" ? (
               <View style={styles.hero}>
                 <View style={styles.heroBadge}>
@@ -167,23 +182,26 @@ export default function App() {
                 pickPdf={study.pickPdf}
                 syncSubjectWithAi={study.syncSubjectWithAi}
                 syncingSubject={study.syncingSubject}
-                answerPracticeQuestion={study.answerPracticeQuestion}
-                resetPracticeAnswers={study.resetPracticeAnswers}
                 askPracticeAssistant={study.askPracticeAssistant}
+                generatePracticeSet={study.generatePracticeSet}
+                answerGeneratedQuestion={study.answerGeneratedQuestion}
+                analyzeGeneratedPractice={study.analyzeGeneratedPractice}
               />
             ) : null}
           </ScrollView>
 
-          <View style={styles.bottomTabBar}>
-            {TABS.map((tab) => (
-              <Pressable key={tab.id} style={styles.bottomTab} onPress={() => setActiveTab(tab.id)}>
-                <View style={[styles.bottomTabIconWrap, activeTab === tab.id && styles.bottomTabIconWrapActive]}>
-                  <Ionicons name={tab.icon as keyof typeof Ionicons.glyphMap} size={18} color={activeTab === tab.id ? colors.surface : colors.inkSoft} />
-                </View>
-                <Text style={[styles.bottomTabText, activeTab === tab.id && styles.bottomTabTextActive]}>{tab.label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {!keyboardVisible ? (
+            <View style={styles.bottomTabBar}>
+              {TABS.map((tab) => (
+                <Pressable key={tab.id} style={styles.bottomTab} onPress={() => setActiveTab(tab.id)}>
+                  <View style={[styles.bottomTabIconWrap, activeTab === tab.id && styles.bottomTabIconWrapActive]}>
+                    <Ionicons name={tab.icon as keyof typeof Ionicons.glyphMap} size={18} color={activeTab === tab.id ? colors.surface : colors.inkSoft} />
+                  </View>
+                  <Text style={[styles.bottomTabText, activeTab === tab.id && styles.bottomTabTextActive]}>{tab.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -203,9 +221,14 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 18,
-    paddingTop: Platform.OS === "android" ? 30 : 22,
+    paddingTop: Platform.OS === "android" ? 36 : 22,
     gap: 16,
+  },
+  contentWithTabs: {
     paddingBottom: 130,
+  },
+  contentKeyboardOpen: {
+    paddingBottom: 28,
   },
   loadingWrap: {
     flex: 1,

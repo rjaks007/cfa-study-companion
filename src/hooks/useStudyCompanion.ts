@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
-import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, PracticeChapter, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
+import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, GeneratedPracticeReview, GeneratedPracticeSet, PracticeChapter, PracticeDifficulty, PracticeQuestion, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
 import { calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
@@ -69,6 +69,51 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
     .filter(Boolean) as PracticeChapter[];
 }
 
+function normalizePracticeQuestions(value: unknown): PracticeQuestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((question: any, index: number) => {
+      const prompt = typeof question?.question === "string" ? question.question.trim() : "";
+      if (!prompt) return null;
+      return {
+        id: typeof question?.id === "string" ? question.id : `generated-question-${index + 1}`,
+        question: prompt,
+        options: Array.isArray(question?.options) ? question.options.map((option: unknown) => String(option).trim()).filter(Boolean) : [],
+        answer: typeof question?.answer === "string" ? question.answer.trim() : "",
+        explanation: typeof question?.explanation === "string" ? question.explanation.trim() : "",
+        difficulty: typeof question?.difficulty === "string" ? question.difficulty.trim() : "",
+        tags: Array.isArray(question?.tags) ? question.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean) : [],
+      };
+    })
+    .filter(Boolean) as PracticeQuestion[];
+}
+
+function normalizeGeneratedSet(value: unknown): GeneratedPracticeSet | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<GeneratedPracticeSet>;
+  const questions = normalizePracticeQuestions(record.questions);
+  if (!questions.length) return null;
+  return {
+    id: record.id || makeId("generated-set"),
+    chapterTitle: record.chapterTitle || "Generated practice",
+    questionCount: Number(record.questionCount || questions.length),
+    difficulty: (record.difficulty || "1") as PracticeDifficulty,
+    questions,
+    createdAt: record.createdAt || todayISO(),
+  };
+}
+
+function normalizeGeneratedReview(value: unknown): GeneratedPracticeReview | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<GeneratedPracticeReview>;
+  return {
+    summary: typeof record.summary === "string" ? record.summary : "",
+    reviseTopics: Array.isArray(record.reviseTopics) ? record.reviseTopics.map((item) => String(item).trim()).filter(Boolean) : [],
+    conceptExample: typeof record.conceptExample === "string" ? record.conceptExample : "",
+    numericalExample: typeof record.numericalExample === "string" ? record.numericalExample : "",
+  };
+}
+
 function normalizeReading(reading: StoredState["readings"][number]) {
   return {
     ...reading,
@@ -107,6 +152,9 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
     aiError: upload.aiError || "",
     parsedChapters: normalizeParsedChapters(upload.parsedChapters),
     userAnswers: upload.userAnswers || {},
+    generatedSet: normalizeGeneratedSet(upload.generatedSet),
+    generatedAnswers: upload.generatedAnswers || {},
+    generatedReview: normalizeGeneratedReview(upload.generatedReview),
   };
 }
 
@@ -682,6 +730,9 @@ export function useStudyCompanion() {
           aiError: "",
           parsedChapters: [],
           userAnswers: {},
+          generatedSet: null,
+          generatedAnswers: {},
+          generatedReview: null,
         };
         const hasNotes = Boolean(next.notesPdfName);
         const hasQBank = Boolean(next.questionBankPdfName);
@@ -780,6 +831,9 @@ export function useStudyCompanion() {
                 aiError: "",
                 parsedChapters,
                 userAnswers: {},
+                generatedSet: null,
+                generatedAnswers: {},
+                generatedReview: null,
               }
             : item,
         ),
@@ -851,6 +905,8 @@ export function useStudyCompanion() {
         parsedChapters: upload?.parsedChapters || [],
         performanceSummary,
         aiSummary: upload?.aiSummary || "",
+        generatedSet: upload?.generatedSet,
+        generatedReview: upload?.generatedReview,
         extraContext: extraContext || {},
       }),
     });
@@ -895,6 +951,120 @@ export function useStudyCompanion() {
           : upload,
       ),
     }));
+  }
+
+  async function generatePracticeSet(subject: Subject, chapterTitle: string, questionCount: number, difficulty: PracticeDifficulty) {
+    const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
+    if (!backendBaseUrl) throw new Error("Add your backend URL first.");
+
+    const upload = studyState.uploads.find((item) => item.subject === subject);
+    if (!upload || !upload.parsedChapters.length) {
+      throw new Error("Sync this subject with AI first.");
+    }
+
+    const response = await fetch(`${backendBaseUrl}/api/generate-practice-set`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subject,
+        chapterTitle,
+        questionCount,
+        difficulty,
+        parsedChapters: upload.parsedChapters,
+        aiSummary: upload.aiSummary,
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.details || payload?.error || "Failed to generate practice set.");
+    }
+
+    const generatedSet = normalizeGeneratedSet(payload.practiceSet);
+    if (!generatedSet) {
+      throw new Error("The practice set came back empty.");
+    }
+
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((item) =>
+        item.subject === subject
+          ? {
+              ...item,
+              generatedSet,
+              generatedAnswers: {},
+              generatedReview: null,
+            }
+          : item,
+      ),
+    }));
+
+    return generatedSet;
+  }
+
+  function answerGeneratedQuestion(subject: Subject, questionId: string, selectedOption: string) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) =>
+        upload.subject === subject
+          ? {
+              ...upload,
+              generatedAnswers: {
+                ...upload.generatedAnswers,
+                [questionId]: selectedOption,
+              },
+            }
+          : upload,
+      ),
+    }));
+  }
+
+  async function analyzeGeneratedPractice(subject: Subject) {
+    const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
+    if (!backendBaseUrl) throw new Error("Add your backend URL first.");
+
+    const upload = studyState.uploads.find((item) => item.subject === subject);
+    if (!upload?.generatedSet) throw new Error("Generate a practice set first.");
+
+    const response = await fetch(`${backendBaseUrl}/api/analyze-practice-set`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subject,
+        generatedSet: upload.generatedSet,
+        generatedAnswers: upload.generatedAnswers,
+        parsedChapters: upload.parsedChapters,
+        aiSummary: upload.aiSummary,
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.details || payload?.error || "Failed to analyze practice set.");
+    }
+
+    const review = normalizeGeneratedReview(payload.review);
+    if (!review) {
+      throw new Error("The review summary came back empty.");
+    }
+
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((item) =>
+        item.subject === subject
+          ? {
+              ...item,
+              generatedReview: review,
+            }
+          : item,
+      ),
+    }));
+
+    return review;
   }
 
   async function exportBackup() {
@@ -1024,6 +1194,9 @@ export function useStudyCompanion() {
     askPracticeAssistant,
     answerPracticeQuestion,
     resetPracticeAnswers,
+    generatePracticeSet,
+    answerGeneratedQuestion,
+    analyzeGeneratedPractice,
     exportBackup,
     importBackup,
   };

@@ -16,6 +16,23 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+function parseStructuredOutput(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -181,6 +198,182 @@ app.post("/api/study-chat", async (req, res) => {
     console.error(error);
     res.status(500).json({
       error: "Failed to answer study assistant question.",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/generate-practice-set", async (req, res) => {
+  try {
+    const {
+      subject = "Unknown subject",
+      chapterTitle = "",
+      questionCount = 10,
+      difficulty = "1",
+      parsedChapters = [],
+      aiSummary = "",
+    } = req.body || {};
+
+    if (!String(chapterTitle).trim()) {
+      return res.status(400).json({ error: "chapterTitle is required." });
+    }
+
+    const cappedCount = Math.max(3, Math.min(40, Number(questionCount || 10)));
+    const chapter = Array.isArray(parsedChapters)
+      ? parsedChapters.find((item) => String(item?.readingTitle || "").trim() === String(chapterTitle).trim())
+      : null;
+
+    if (!chapter) {
+      return res.status(400).json({ error: "Could not find that chapter in parsed material." });
+    }
+
+    const response = await client.responses.create({
+      model: "gpt-4.1",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You create CFA Level I chapter-wise practice sets from provided source material. " +
+                "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, and example questions. " +
+                "Return strict JSON only with this shape: " +
+                '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"1","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
+                "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
+                "Difficulty 1 means normal concept/application. Difficulty 2 means exam-style and moderately challenging. Difficulty 3 means hard, trap-aware, and computation-ready when appropriate. " +
+                "Do not use markdown or extra text.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify({
+                subject,
+                chapterTitle,
+                questionCount: cappedCount,
+                difficulty,
+                aiSummary,
+                chapter,
+              }),
+            },
+          ],
+        },
+      ],
+    });
+
+    const structured = parseStructuredOutput(response.output_text);
+    if (!structured?.practiceSet?.questions?.length) {
+      return res.status(500).json({
+        error: "The generated practice set was empty.",
+        details: "AI returned no usable questions.",
+      });
+    }
+
+    res.json({
+      ok: true,
+      practiceSet: structured.practiceSet,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to generate practice set.",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/analyze-practice-set", async (req, res) => {
+  try {
+    const {
+      subject = "Unknown subject",
+      generatedSet = null,
+      generatedAnswers = {},
+      parsedChapters = [],
+      aiSummary = "",
+    } = req.body || {};
+
+    if (!generatedSet?.questions?.length) {
+      return res.status(400).json({ error: "generatedSet is required." });
+    }
+
+    const answeredQuestions = generatedSet.questions
+      .map((question) => {
+        const selected = generatedAnswers?.[question.id] || "";
+        const answer = String(question.answer || "");
+        return {
+          question: question.question,
+          selected,
+          correctAnswer: answer,
+          correct: Boolean(selected && answer && String(selected).trim().toLowerCase() === answer.trim().toLowerCase()),
+          explanation: question.explanation || "",
+          tags: Array.isArray(question.tags) ? question.tags : [],
+        };
+      })
+      .filter((question) => question.selected);
+
+    const incorrect = answeredQuestions.filter((question) => !question.correct);
+
+    const response = await client.responses.create({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are creating a weak-topic review for a CFA Level I student after a chapter practice set. " +
+                "Use the mistakes, chapter notes, revision focus, and answer patterns to produce a precise study plan. " +
+                "Return strict JSON only with this shape: " +
+                '{"review":{"summary":"","reviseTopics":[],"conceptExample":"","numericalExample":""}}. ' +
+                "The summary should say exactly what to study next. " +
+                "reviseTopics should be short exact concepts or formulas. " +
+                "conceptExample should be a short plain-language teaching example. " +
+                "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. " +
+                "Do not use markdown.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify({
+                subject,
+                chapterTitle: generatedSet.chapterTitle,
+                difficulty: generatedSet.difficulty,
+                aiSummary,
+                parsedChapters,
+                answeredQuestions,
+                incorrect,
+              }),
+            },
+          ],
+        },
+      ],
+    });
+
+    const structured = parseStructuredOutput(response.output_text);
+    if (!structured?.review) {
+      return res.status(500).json({
+        error: "The review summary came back empty.",
+        details: "AI returned no usable review summary.",
+      });
+    }
+
+    res.json({
+      ok: true,
+      review: structured.review,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to analyze practice set.",
       details: error instanceof Error ? error.message : "Unknown error",
     });
   }

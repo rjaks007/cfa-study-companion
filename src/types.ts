@@ -16,6 +16,7 @@ export type FlashcardRating = "again" | "hard" | "good" | "easy";
 export type FlashcardType = "Concept" | "Formula" | "Application" | "Trap";
 export type FlashcardStatus = "new" | "learning" | "relearning";
 export type AppTab = "overview" | "weekly" | "progress" | "practice";
+export type PracticeDifficulty = "1" | "2" | "3";
 export type MistakeType = "Concept weak" | "Formula weak" | "Application weak" | "Silly mistake" | "Misread question" | "No major issue";
 export type WeakTag =
   | "Concept weak"
@@ -150,6 +151,22 @@ export interface PracticeChapter {
   questions: PracticeQuestion[];
 }
 
+export interface GeneratedPracticeSet {
+  id: string;
+  chapterTitle: string;
+  questionCount: number;
+  difficulty: PracticeDifficulty;
+  questions: PracticeQuestion[];
+  createdAt: string;
+}
+
+export interface GeneratedPracticeReview {
+  summary: string;
+  reviseTopics: string[];
+  conceptExample: string;
+  numericalExample: string;
+}
+
 export interface UploadRecord {
   subject: Subject;
   notesPdfName: string;
@@ -166,6 +183,9 @@ export interface UploadRecord {
   aiError: string;
   parsedChapters: PracticeChapter[];
   userAnswers: Record<string, string>;
+  generatedSet: GeneratedPracticeSet | null;
+  generatedAnswers: Record<string, string>;
+  generatedReview: GeneratedPracticeReview | null;
 }
 
 export interface MockExam {

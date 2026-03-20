@@ -225,6 +225,9 @@ export function defaultUploads() {
     aiError: "",
     parsedChapters: [],
     userAnswers: {},
+    generatedSet: null,
+    generatedAnswers: {},
+    generatedReview: null,
   }));
 }
 
