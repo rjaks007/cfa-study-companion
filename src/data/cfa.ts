@@ -223,6 +223,8 @@ export function defaultUploads() {
     readyForReview: false,
     aiSummary: "",
     aiError: "",
+    parsedChapters: [],
+    userAnswers: {},
   }));
 }
 

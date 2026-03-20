@@ -67,15 +67,17 @@ app.post(
         type: "input_text",
         text:
           `You are helping organize CFA Level I practice materials for ${subject}. ` +
-          "Extract questions from the uploaded question bank. " +
-          "If notes are present, use them to infer the most likely subject and reading/chapter mapping. " +
+          "Extract as many usable questions as possible from the uploaded question bank, not just a small sample. Work through the full file and preserve coverage across chapters when possible. " +
+          "If notes are present, use them to infer the most likely subject and reading/chapter mapping, and create a concise revision summary for each chapter. " +
           "Return strict JSON with this shape: " +
-          `{"subject":"", "chapters":[{"readingTitle":"","questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+          `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+          "The revisionFocus array should contain the exact concepts or formulas that deserve another study pass. " +
           "If answers are not available, leave answer as an empty string.",
       });
 
       const response = await client.responses.create({
         model: "gpt-4.1-mini",
+        max_output_tokens: 20000,
         input: [
           {
             role: "user",
@@ -100,6 +102,61 @@ app.post(
     }
   },
 );
+
+app.post("/api/study-chat", async (req, res) => {
+  try {
+    const { subject = "Unknown subject", question = "", parsedChapters = [], performanceSummary = null, aiSummary = "", extraContext = {} } = req.body || {};
+
+    if (!question || !String(question).trim()) {
+      return res.status(400).json({ error: "question is required." });
+    }
+
+    const response = await client.responses.create({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are a CFA Level I study assistant inside a personal study app. " +
+                "Use the supplied notes summaries, parsed chapters, and performance summary to answer clearly, practically, and briefly. " +
+                "When useful, end with a short bullet list of what to revise next.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify({
+                subject,
+                question,
+                performanceSummary,
+                aiSummary,
+                parsedChapters,
+                extraContext,
+              }),
+            },
+          ],
+        },
+      ],
+    });
+
+    res.json({
+      ok: true,
+      answer: response.output_text,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to answer study assistant question.",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
 
 app.listen(port, () => {
   console.log(`CFA Study Companion backend running on http://localhost:${port}`);

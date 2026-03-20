@@ -17,6 +17,7 @@ export default function App() {
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
   const [studySetupDate, setStudySetupDate] = useState("");
   const study = useStudyCompanion();
+  const activeTabMeta = TABS.find((tab) => tab.id === activeTab);
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
@@ -35,6 +36,10 @@ export default function App() {
     setActiveTab("weekly");
   }
 
+  function clearWeeklyTarget() {
+    setWeeklyTarget({});
+  }
+
   if (!study.isHydrated) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -51,110 +56,131 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-          <View style={styles.hero}>
-            <View style={styles.heroBadge}>
-              <Ionicons name="school-outline" size={15} color={colors.primary} />
-              <Text style={styles.heroBadgeText}>CFA Study Companion</Text>
-            </View>
-            <Text style={styles.heroTitle}>Stay on track. Review at the right time.</Text>
-            <Text style={styles.heroSubtitle}>
-              Built for a clean CFA workflow: see this week, update chapters fast, track confidence, and let review dates organize themselves.
-            </Text>
-            <View style={styles.metricRow}>
-              <MetricCard label="Week" value={`${study.currentWeek}/26`} icon="calendar-outline" />
-              <MetricCard label="Syllabus" value={`${study.syllabusProgress}%`} icon="checkmark-circle-outline" />
-              <MetricCard label="This week" value={`${study.weekProgress.done}/${study.weekProgress.total || 0}`} icon="list-outline" />
-              <MetricCard label="Due tomorrow" value={String(study.dueTomorrowReadings.length)} icon="notifications-outline" />
-            </View>
-            <View style={styles.setupCard}>
-              <Text style={styles.sectionLabel}>Study setup</Text>
-              <TextInput
-                value={studySetupDate}
-                onChangeText={setStudySetupDate}
-                onBlur={() => {
-                  const parsed = parseInputDate(studySetupDate);
-                  if (parsed) {
-                    study.setStartDate(parsed);
-                    setStudySetupDate(formatInputDate(parsed));
-                  } else {
-                    setStudySetupDate(formatInputDate(study.studyState.startDate));
-                  }
-                }}
-                style={styles.input}
-                placeholder="DD/MM/YYYY"
-                placeholderTextColor={colors.inkSoft}
-              />
-              <View style={styles.setupStatsRow}>
-                <MiniStat label="Plan end" value={formatInputDate(study.planEndDate)} />
-                <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
-                <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
+        <View style={styles.flex}>
+          <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+            {activeTab === "overview" ? (
+              <View style={styles.hero}>
+                <View style={styles.heroBadge}>
+                  <Ionicons name="school-outline" size={15} color={colors.primary} />
+                  <Text style={styles.heroBadgeText}>CFA Study Companion</Text>
+                </View>
+                <Text style={styles.heroTitle}>Stay on track. Review at the right time.</Text>
+                <Text style={styles.heroSubtitle}>
+                  Built for a clean CFA workflow: see this week, update chapters fast, track confidence, and let review dates organize themselves.
+                </Text>
+                <View style={styles.metricRow}>
+                  <MetricCard label="Week" value={`${study.currentWeek}/26`} icon="calendar-outline" />
+                  <MetricCard label="Syllabus" value={`${study.syllabusProgress}%`} icon="checkmark-circle-outline" />
+                  <MetricCard label="This week" value={`${study.weekProgress.done}/${study.weekProgress.total || 0}`} icon="list-outline" />
+                  <MetricCard label="Due tomorrow" value={String(study.dueTomorrowReadings.length)} icon="notifications-outline" />
+                </View>
+                <View style={styles.setupCard}>
+                  <Text style={styles.sectionLabel}>Study setup</Text>
+                  <TextInput
+                    value={studySetupDate}
+                    onChangeText={setStudySetupDate}
+                    onBlur={() => {
+                      const parsed = parseInputDate(studySetupDate);
+                      if (parsed) {
+                        study.setStartDate(parsed);
+                        setStudySetupDate(formatInputDate(parsed));
+                      } else {
+                        setStudySetupDate(formatInputDate(study.studyState.startDate));
+                      }
+                    }}
+                    style={styles.input}
+                    placeholder="DD/MM/YYYY"
+                    placeholderTextColor={colors.inkSoft}
+                  />
+                  <View style={styles.setupStatsRow}>
+                    <MiniStat label="Plan end" value={formatInputDate(study.planEndDate)} />
+                    <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
+                    <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
+                  </View>
+                </View>
               </View>
-            </View>
-          </View>
+            ) : (
+              <View style={styles.compactHeader}>
+                <Text style={styles.compactTitle}>{activeTabMeta?.label}</Text>
+                <Text style={styles.compactSubtitle}>
+                  {activeTab === "weekly"
+                    ? "Keep this week moving, then look ahead only when you need to."
+                    : activeTab === "progress"
+                      ? "See every subject clearly, then jump into updates fast."
+                      : "Turn uploaded material into questions, insights, and revision help."}
+                </Text>
+              </View>
+            )}
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-            {TABS.map((tab) => (
-              <Pressable key={tab.id} style={[styles.tabChip, activeTab === tab.id && styles.tabChipActive]} onPress={() => setActiveTab(tab.id)}>
-                <Ionicons name={tab.icon as keyof typeof Ionicons.glyphMap} size={16} color={activeTab === tab.id ? colors.surface : colors.inkSoft} />
-                <Text style={[styles.tabChipText, activeTab === tab.id && styles.tabChipTextActive]}>{tab.label}</Text>
-              </Pressable>
-            ))}
+            {activeTab === "overview" ? (
+              <OverviewScreen
+                currentWeek={study.currentWeek}
+                syllabusProgress={study.syllabusProgress}
+                weekProgress={study.weekProgress}
+                dueTomorrowReadings={study.dueTomorrowReadings}
+                overdueReadings={study.overdueReadings}
+                todayPlan={study.todayPlan}
+                notificationsEnabled={study.studyState.notificationsEnabled}
+                onEnableNotifications={study.enableReviewNotifications}
+                onOpenWeekly={() => {
+                  setWeeklyTarget({});
+                  setActiveTab("weekly");
+                }}
+              />
+            ) : null}
+
+            {activeTab === "weekly" ? (
+              <WeeklyPlanScreen
+                currentWeek={study.currentWeek}
+                weeks={study.studyState.weeks}
+                readingMap={study.readingMap}
+                selectedSubject={study.studyState.selectedSubject}
+                setSelectedSubject={study.setSelectedSubject}
+                cycleReadingStatus={study.cycleReadingStatus}
+                setReadingStudyDate={study.setReadingStudyDate}
+                setReadingConfidence={study.setReadingConfidence}
+                resetSubjectForRevision={study.resetSubjectForRevision}
+                resetAllForRevision={study.resetAllForRevision}
+                targetWeek={weeklyTarget.week}
+                targetReadingId={weeklyTarget.readingId}
+                onConsumeTarget={clearWeeklyTarget}
+              />
+            ) : null}
+
+            {activeTab === "progress" ? (
+              <ProgressScreen
+                subjectStats={study.subjectStats}
+                readings={study.studyState.readings}
+                onOpenSubject={openWeeklyForSubject}
+                onOpenReading={openWeeklyForReading}
+              />
+            ) : null}
+            {activeTab === "practice" ? (
+              <PracticeScreen
+                uploads={study.studyState.uploads}
+                backendBaseUrl={study.studyState.backendBaseUrl}
+                setBackendBaseUrl={study.setBackendBaseUrl}
+                pickPdf={study.pickPdf}
+                syncSubjectWithAi={study.syncSubjectWithAi}
+              syncingSubject={study.syncingSubject}
+              answerPracticeQuestion={study.answerPracticeQuestion}
+              resetPracticeAnswers={study.resetPracticeAnswers}
+              askPracticeAssistant={study.askPracticeAssistant}
+            />
+            ) : null}
           </ScrollView>
 
-          {activeTab === "overview" ? (
-            <OverviewScreen
-              currentWeek={study.currentWeek}
-              syllabusProgress={study.syllabusProgress}
-              weekProgress={study.weekProgress}
-              dueTomorrowReadings={study.dueTomorrowReadings}
-              overdueReadings={study.overdueReadings}
-              todayPlan={study.todayPlan}
-              notificationsEnabled={study.studyState.notificationsEnabled}
-              onEnableNotifications={study.enableReviewNotifications}
-              onOpenWeekly={() => {
-                setWeeklyTarget({});
-                setActiveTab("weekly");
-              }}
-            />
-          ) : null}
-
-          {activeTab === "weekly" ? (
-            <WeeklyPlanScreen
-              currentWeek={study.currentWeek}
-              weeks={study.studyState.weeks}
-              readingMap={study.readingMap}
-              selectedSubject={study.studyState.selectedSubject}
-              setSelectedSubject={study.setSelectedSubject}
-              cycleReadingStatus={study.cycleReadingStatus}
-              setReadingStudyDate={study.setReadingStudyDate}
-              setReadingConfidence={study.setReadingConfidence}
-              resetSubjectForRevision={study.resetSubjectForRevision}
-              resetAllForRevision={study.resetAllForRevision}
-              targetWeek={weeklyTarget.week}
-              targetReadingId={weeklyTarget.readingId}
-            />
-          ) : null}
-
-          {activeTab === "progress" ? (
-            <ProgressScreen
-              subjectStats={study.subjectStats}
-              readings={study.studyState.readings}
-              onOpenSubject={openWeeklyForSubject}
-              onOpenReading={openWeeklyForReading}
-            />
-          ) : null}
-          {activeTab === "practice" ? (
-            <PracticeScreen
-              uploads={study.studyState.uploads}
-              backendBaseUrl={study.studyState.backendBaseUrl}
-              setBackendBaseUrl={study.setBackendBaseUrl}
-              pickPdf={study.pickPdf}
-              syncSubjectWithAi={study.syncSubjectWithAi}
-              syncingSubject={study.syncingSubject}
-            />
-          ) : null}
-        </ScrollView>
+          <View style={styles.bottomTabBar}>
+            {TABS.map((tab) => (
+              <Pressable key={tab.id} style={styles.bottomTab} onPress={() => setActiveTab(tab.id)}>
+                <View style={[styles.bottomTabIconWrap, activeTab === tab.id && styles.bottomTabIconWrapActive]}>
+                  <Ionicons name={tab.icon as keyof typeof Ionicons.glyphMap} size={18} color={activeTab === tab.id ? colors.surface : colors.inkSoft} />
+                </View>
+                <Text style={[styles.bottomTabText, activeTab === tab.id && styles.bottomTabTextActive]}>{tab.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -175,7 +201,7 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingTop: Platform.OS === "android" ? 30 : 22,
     gap: 16,
-    paddingBottom: 28,
+    paddingBottom: 110,
   },
   loadingWrap: {
     flex: 1,
@@ -258,26 +284,64 @@ const styles = StyleSheet.create({
   tabRow: {
     gap: 10,
   },
-  tabChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+  compactHeader: {
     backgroundColor: colors.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: colors.border,
+    padding: 18,
+    gap: 8,
   },
-  tabChipActive: {
+  compactTitle: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  compactSubtitle: {
+    color: colors.inkSoft,
+    lineHeight: 20,
+  },
+  bottomTabBar: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: Platform.OS === "ios" ? 18 : 14,
+    backgroundColor: colors.surface,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    shadowColor: "#112033",
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  bottomTab: {
+    flex: 1,
+    alignItems: "center",
+    gap: 6,
+  },
+  bottomTabIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surfaceMuted,
+  },
+  bottomTabIconWrapActive: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary,
   },
-  tabChipText: {
+  bottomTabText: {
+    fontSize: 11,
     color: colors.inkSoft,
     fontWeight: "700",
   },
-  tabChipTextActive: {
-    color: colors.surface,
+  bottomTabTextActive: {
+    color: colors.primary,
   },
 });

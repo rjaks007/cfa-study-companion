@@ -132,6 +132,24 @@ export interface Flashcard {
   suspended: boolean;
 }
 
+export interface PracticeQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+  difficulty: string;
+  tags: string[];
+}
+
+export interface PracticeChapter {
+  id: string;
+  readingTitle: string;
+  notesSummary: string;
+  revisionFocus: string[];
+  questions: PracticeQuestion[];
+}
+
 export interface UploadRecord {
   subject: Subject;
   notesPdfName: string;
@@ -146,6 +164,8 @@ export interface UploadRecord {
   readyForReview: boolean;
   aiSummary: string;
   aiError: string;
+  parsedChapters: PracticeChapter[];
+  userAnswers: Record<string, string>;
 }
 
 export interface MockExam {

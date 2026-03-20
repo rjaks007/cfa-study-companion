@@ -25,7 +25,7 @@ export function ProgressScreen({
   return (
     <>
       <Panel title="Progress" icon="bar-chart-outline">
-        <Text style={styles.copy}>Tap a subject to open or hide its chapters. Tap a subject or chapter again to jump straight into Weekly Plan and update it there.</Text>
+        <Text style={styles.copy}>Tap a subject to open or hide its chapters. Tap any chapter card to jump into Weekly Plan with that reading opened and highlighted in its own week.</Text>
         {subjectStats.map((stat) => {
           const subjectReadings = readings.filter((reading) => reading.subject === stat.subject);
           const isExpanded = expandedSubjects[stat.subject] ?? false;
@@ -48,7 +48,7 @@ export function ProgressScreen({
               <ProgressBar progress={stat.progress} />
 
               <Pressable style={styles.jumpLine} onPress={() => onOpenSubject(stat.subject)}>
-                <Text style={styles.jumpText}>Open {stat.subject} in Weekly Plan</Text>
+                <Text style={styles.jumpText}>Main study flow for this subject</Text>
               </Pressable>
 
               {isExpanded ? (

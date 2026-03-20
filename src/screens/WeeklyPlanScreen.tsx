@@ -25,6 +25,7 @@ export function WeeklyPlanScreen({
   resetAllForRevision,
   targetWeek,
   targetReadingId,
+  onConsumeTarget,
 }: {
   currentWeek: number;
   weeks: WeekPlan[];
@@ -38,38 +39,41 @@ export function WeeklyPlanScreen({
   resetAllForRevision: () => void;
   targetWeek?: number;
   targetReadingId?: string;
+  onConsumeTarget?: () => void;
 }) {
   const [expandedReadingId, setExpandedReadingId] = useState<string>("");
   const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>(
     Object.fromEntries(weeks.map((week) => [week.week, week.week === currentWeek])),
   );
   const [customDate, setCustomDate] = useState<Record<string, string>>({});
+  const [recentJump, setRecentJump] = useState<{ week?: number; readingId?: string }>({});
 
   useEffect(() => {
-    if (!targetWeek) return;
-    setExpandedWeeks((current) => ({ ...current, [targetWeek]: true }));
-  }, [targetWeek]);
+    if (!targetWeek && !targetReadingId) return;
 
-  useEffect(() => {
-    if (!targetReadingId) return;
-    setExpandedReadingId(targetReadingId);
-  }, [targetReadingId]);
+    setExpandedWeeks((current) => ({
+      ...current,
+      ...(targetWeek ? { [targetWeek]: true } : {}),
+    }));
+
+    if (targetReadingId) {
+      setExpandedReadingId(targetReadingId);
+    }
+
+    setRecentJump({
+      week: targetWeek,
+      readingId: targetReadingId,
+    });
+
+    onConsumeTarget?.();
+  }, [onConsumeTarget, targetReadingId, targetWeek]);
 
   const currentWeekReadings = useMemo(() => {
-    const week = weeks.find((item) => item.week === currentWeek);
+    const baseWeek = recentJump.week || currentWeek;
+    const week = weeks.find((item) => item.week === baseWeek);
     const rows = (week?.readings || []).map((id) => readingMap[id]).filter(Boolean);
     return rows.filter((reading) => reading.subject === selectedSubject);
-  }, [currentWeek, weeks, readingMap, selectedSubject]);
-
-  const focusedWeek = targetWeek || currentWeek;
-
-  const focusedWeekReadings = useMemo(() => {
-    const week = weeks.find((item) => item.week === focusedWeek);
-    const rows = (week?.readings || []).map((id) => readingMap[id]).filter(Boolean);
-    return rows.filter((reading) => reading.subject === selectedSubject);
-  }, [focusedWeek, weeks, readingMap, selectedSubject]);
-
-  const targetReading = targetReadingId ? readingMap[targetReadingId] : undefined;
+  }, [currentWeek, readingMap, recentJump.week, selectedSubject, weeks]);
 
   function toggleWeek(weekNumber: number) {
     setExpandedWeeks((current) => ({ ...current, [weekNumber]: !current[weekNumber] }));
@@ -78,9 +82,10 @@ export function WeeklyPlanScreen({
   function renderReadingCard(reading: Reading) {
     const expanded = expandedReadingId === reading.id;
     const dateValue = customDate[reading.id] ?? reading.lastReviewed ?? "";
+    const highlighted = recentJump.readingId === reading.id;
 
     return (
-      <View key={reading.id} style={styles.readingCard}>
+      <View key={reading.id} style={[styles.readingCard, highlighted && styles.readingCardHighlighted]}>
         <Pressable style={styles.rowTop} onPress={() => setExpandedReadingId(expanded ? "" : reading.id)}>
           <View style={styles.flex}>
             <Text style={styles.rowTitle}>
@@ -165,26 +170,22 @@ export function WeeklyPlanScreen({
         </View>
       </Panel>
 
-      <Panel title={`${targetWeek ? "Focused week" : "This week first"} · Week ${focusedWeek}`} icon={targetWeek ? "locate-outline" : "today-outline"}>
-        {targetWeek ? (
-          <Text style={styles.roadmapCopy}>
-            You opened this chapter from Progress, so this panel is locked onto the exact study week for that topic.
+      {recentJump.week ? (
+        <View style={styles.jumpBanner}>
+          <Text style={styles.jumpBannerTitle}>Opened from Progress</Text>
+          <Text style={styles.jumpBannerCopy}>
+            Week {recentJump.week} was opened and highlighted below. Weekly Plan is back to normal, so you can move around freely.
           </Text>
-        ) : null}
-        {targetReading && targetWeek && targetReading.subject === selectedSubject ? (
-          renderReadingCard(targetReading)
-        ) : focusedWeekReadings.length ? (
-          focusedWeekReadings.map(renderReadingCard)
+        </View>
+      ) : null}
+
+      <Panel title={`Week ${recentJump.week || currentWeek} snapshot`} icon="today-outline">
+        {currentWeekReadings.length ? (
+          currentWeekReadings.map(renderReadingCard)
         ) : (
           <EmptyState text="No readings found in this week for the selected subject." />
         )}
       </Panel>
-
-      {targetWeek && targetWeek !== currentWeek ? (
-        <Panel title={`Current week preview · Week ${currentWeek}`} icon="today-outline">
-          {currentWeekReadings.length ? currentWeekReadings.map(renderReadingCard) : <EmptyState text="No readings this week for the selected subject." />}
-        </Panel>
-      ) : null}
 
       <Panel title="Full roadmap" icon="map-outline">
         <Text style={styles.roadmapCopy}>
@@ -199,7 +200,14 @@ export function WeeklyPlanScreen({
           const isExpanded = expandedWeeks[week.week];
 
           return (
-            <View key={week.week} style={[styles.weekCard, week.week === currentWeek && styles.weekCardActive]}>
+            <View
+              key={week.week}
+              style={[
+                styles.weekCard,
+                week.week === currentWeek && styles.weekCardActive,
+                recentJump.week === week.week && styles.weekCardTargeted,
+              ]}
+            >
               <Pressable style={styles.weekHeader} onPress={() => toggleWeek(week.week)}>
                 <View style={styles.flex}>
                   <Text style={styles.weekTitle}>Week {week.week}</Text>
@@ -271,6 +279,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#e7f4f2",
     borderColor: "#9ed5ce",
   },
+  weekCardTargeted: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
   weekHeader: {
     flexDirection: "row",
     gap: 10,
@@ -300,6 +312,10 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  readingCardHighlighted: {
+    borderColor: colors.accent,
+    backgroundColor: "#f8fbff",
+  },
   rowTop: {
     flexDirection: "row",
     gap: 12,
@@ -317,6 +333,22 @@ const styles = StyleSheet.create({
   },
   statusWrap: {
     justifyContent: "center",
+  },
+  jumpBanner: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
+    padding: 14,
+    gap: 6,
+  },
+  jumpBannerTitle: {
+    color: colors.accent,
+    fontWeight: "800",
+  },
+  jumpBannerCopy: {
+    color: colors.inkSoft,
+    lineHeight: 19,
   },
   quickRow: {
     flexDirection: "row",

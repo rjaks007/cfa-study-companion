@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
-import { CardDraft, ChapterQuestionSummary, Flashcard, SessionDraft, StoredState, StudySession, Subject, UploadRecord, FlashcardRating } from "../types";
+import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, PracticeChapter, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
 import { calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
@@ -25,6 +25,48 @@ function parseStructuredAiOutput(content: string) {
       return null;
     }
   }
+}
+
+function normalizeParsedChapters(value: unknown): PracticeChapter[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((chapter, chapterIndex) => {
+      const readingTitle = typeof chapter?.readingTitle === "string" ? chapter.readingTitle.trim() : "";
+      const questions = Array.isArray(chapter?.questions)
+        ? chapter.questions
+            .map((question: any, questionIndex: number) => {
+              const prompt = typeof question?.question === "string" ? question.question.trim() : "";
+              const options = Array.isArray(question?.options)
+                ? question.options.map((option: unknown) => String(option).trim()).filter(Boolean)
+                : [];
+              if (!prompt) return null;
+              return {
+                id: `chapter-${chapterIndex + 1}-question-${questionIndex + 1}`,
+                question: prompt,
+                options,
+                answer: typeof question?.answer === "string" ? question.answer.trim() : "",
+                explanation: typeof question?.explanation === "string" ? question.explanation.trim() : "",
+                difficulty: typeof question?.difficulty === "string" ? question.difficulty.trim() : "",
+                tags: Array.isArray(question?.tags) ? question.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean) : [],
+              };
+            })
+            .filter(Boolean)
+        : [];
+
+      if (!readingTitle && !questions.length) return null;
+
+      return {
+        id: `chapter-${chapterIndex + 1}`,
+        readingTitle: readingTitle || `Chapter ${chapterIndex + 1}`,
+        notesSummary: typeof chapter?.notesSummary === "string" ? chapter.notesSummary.trim() : "",
+        revisionFocus: Array.isArray(chapter?.revisionFocus)
+          ? chapter.revisionFocus.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : [],
+        questions,
+      };
+    })
+    .filter(Boolean) as PracticeChapter[];
 }
 
 function normalizeReading(reading: StoredState["readings"][number]) {
@@ -63,6 +105,8 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
     readyForReview: hasNotes && hasQBank,
     aiSummary: upload.aiSummary || "",
     aiError: upload.aiError || "",
+    parsedChapters: normalizeParsedChapters(upload.parsedChapters),
+    userAnswers: upload.userAnswers || {},
   };
 }
 
@@ -636,6 +680,8 @@ export function useStudyCompanion() {
           lastSyncAt: "",
           aiSummary: "",
           aiError: "",
+          parsedChapters: [],
+          userAnswers: {},
         };
         const hasNotes = Boolean(next.notesPdfName);
         const hasQBank = Boolean(next.questionBankPdfName);
@@ -716,7 +762,8 @@ export function useStudyCompanion() {
       }
 
       const structured = parseStructuredAiOutput(payload.output_text || "");
-      const chapterCount = Array.isArray(structured?.chapters) ? structured.chapters.length : upload.chaptersDetected;
+      const parsedChapters = normalizeParsedChapters(structured?.chapters);
+      const chapterCount = parsedChapters.length || upload.chaptersDetected;
 
       setStudyState((current) => ({
         ...current,
@@ -731,6 +778,8 @@ export function useStudyCompanion() {
                 uploadStatus: "Parsed with AI",
                 aiSummary: payload.output_text || "",
                 aiError: "",
+                parsedChapters,
+                userAnswers: {},
               }
             : item,
         ),
@@ -763,6 +812,86 @@ export function useStudyCompanion() {
     await scheduleReviewNotifications(studyState.readings);
     setStudyState((current) => ({ ...current, notificationsEnabled: true }));
     return true;
+  }
+
+  async function askPracticeAssistant(subject: Subject, question: string, extraContext?: Record<string, unknown>) {
+    const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
+    if (!backendBaseUrl) {
+      throw new Error("Add your backend URL first.");
+    }
+
+    const upload = studyState.uploads.find((item) => item.subject === subject);
+    const performanceSummary = upload
+      ? {
+          totalChapters: upload.parsedChapters.length,
+          answered: Object.keys(upload.userAnswers).length,
+          wrongByChapter: upload.parsedChapters.map((chapter) => {
+            const wrong = chapter.questions.filter((question) => {
+              const selected = upload.userAnswers[question.id];
+              return selected && question.answer && selected.trim().toLowerCase() !== question.answer.trim().toLowerCase();
+            }).length;
+            return {
+              readingTitle: chapter.readingTitle,
+              wrong,
+              revisionFocus: chapter.revisionFocus,
+              notesSummary: chapter.notesSummary,
+            };
+          }),
+        }
+      : null;
+
+    const response = await fetch(`${backendBaseUrl}/api/study-chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subject,
+        question,
+        parsedChapters: upload?.parsedChapters || [],
+        performanceSummary,
+        aiSummary: upload?.aiSummary || "",
+        extraContext: extraContext || {},
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.details || payload?.error || "Study assistant request failed.");
+    }
+
+    return String(payload.answer || "").trim();
+  }
+
+  function answerPracticeQuestion(subject: Subject, questionId: string, selectedOption: string) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) =>
+        upload.subject === subject
+          ? {
+              ...upload,
+              userAnswers: {
+                ...upload.userAnswers,
+                [questionId]: selectedOption,
+              },
+            }
+          : upload,
+      ),
+    }));
+  }
+
+  function resetPracticeAnswers(subject: Subject) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) =>
+        upload.subject === subject
+          ? {
+              ...upload,
+              userAnswers: {},
+            }
+          : upload,
+      ),
+    }));
   }
 
   async function exportBackup() {
@@ -889,6 +1018,9 @@ export function useStudyCompanion() {
     pickPdf,
     syncSubjectWithAi,
     enableReviewNotifications,
+    askPracticeAssistant,
+    answerPracticeQuestion,
+    resetPracticeAnswers,
     exportBackup,
     importBackup,
   };
