@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   contentWithTabs: {
-    paddingBottom: 130,
+    paddingBottom: 190,
   },
   contentKeyboardOpen: {
     paddingBottom: 28,
