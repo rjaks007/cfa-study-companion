@@ -15,12 +15,12 @@ import { formatInputDate, parseInputDate } from "./src/utils/study";
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
+  const [practiceTarget, setPracticeTarget] = useState<{ subject?: Subject; chapterTitle?: string }>({});
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const study = useStudyCompanion();
-  const activeTabMeta = TABS.find((tab) => tab.id === activeTab);
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
 
   useEffect(() => {
@@ -35,6 +35,10 @@ export default function App() {
       hide.remove();
     };
   }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [activeTab]);
 
   function openWeeklyForSubject(subject: Subject) {
     study.setSelectedSubject(subject);
@@ -53,9 +57,23 @@ export default function App() {
     setWeeklyTarget({});
   }
 
-  function focusBottomField() {
+  function clearPracticeTarget() {
+    setPracticeTarget({});
+  }
+
+  function openPracticeForReading(reading: Reading) {
+    setPracticeTarget({ subject: reading.subject, chapterTitle: reading.title });
+    setActiveTab("practice");
+  }
+
+  function openPracticeFromOverview(reading: { subject: string; title: string }) {
+    setPracticeTarget({ subject: reading.subject as Subject, chapterTitle: reading.title });
+    setActiveTab("practice");
+  }
+
+  function focusBottomField(targetY = 0) {
     setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
+      scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 140), animated: true });
     }, 150);
   }
 
@@ -145,18 +163,7 @@ export default function App() {
                   ) : null}
                 </Pressable>
               </View>
-            ) : (
-              <View style={styles.compactHeader}>
-                <Text style={styles.compactTitle}>{activeTabMeta?.label}</Text>
-                <Text style={styles.compactSubtitle}>
-                  {activeTab === "weekly"
-                    ? "Keep this week moving, then look ahead only when you need to."
-                    : activeTab === "progress"
-                      ? "See every subject clearly, then jump into updates fast."
-                      : "Turn uploaded material into questions, insights, and revision help."}
-                </Text>
-              </View>
-            )}
+            ) : null}
 
             {activeTab === "overview" ? (
               <OverviewScreen
@@ -170,6 +177,7 @@ export default function App() {
                   setWeeklyTarget({});
                   setActiveTab("weekly");
                 }}
+                onOpenPracticeReading={openPracticeFromOverview}
               />
             ) : null}
 
@@ -213,6 +221,9 @@ export default function App() {
                 answerGeneratedQuestion={study.answerGeneratedQuestion}
                 analyzeGeneratedPractice={study.analyzeGeneratedPractice}
                 onRequestFocusBottomField={focusBottomField}
+                targetSubject={practiceTarget.subject}
+                targetChapterTitle={practiceTarget.chapterTitle}
+                onConsumeTarget={clearPracticeTarget}
               />
             ) : null}
           </ScrollView>
@@ -342,23 +353,6 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     gap: 10,
-  },
-  compactHeader: {
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 18,
-    gap: 8,
-  },
-  compactTitle: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  compactSubtitle: {
-    color: colors.inkSoft,
-    lineHeight: 20,
   },
   bottomTabBar: {
     position: "absolute",

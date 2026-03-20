@@ -22,6 +22,7 @@ export function OverviewScreen({
   notificationsEnabled,
   onEnableNotifications,
   onOpenWeekly,
+  onOpenPracticeReading,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTomorrowReadings: ReadingItem[];
@@ -30,6 +31,7 @@ export function OverviewScreen({
   notificationsEnabled: boolean;
   onEnableNotifications: () => Promise<boolean>;
   onOpenWeekly: () => void;
+  onOpenPracticeReading: (reading: ReadingItem) => void;
 }) {
   const nextPriority = overdueReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
 
@@ -75,7 +77,7 @@ export function OverviewScreen({
       <Panel title="Study now" icon="book-outline">
         {todayPlan.current.length ? (
           todayPlan.current.map((reading) => (
-            <View key={reading.id} style={styles.rowCard}>
+            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenPracticeReading(reading)}>
               <View style={styles.flex}>
                 <Text style={styles.rowTitle}>{reading.subject}</Text>
                 <Text style={styles.rowMeta}>
@@ -83,7 +85,7 @@ export function OverviewScreen({
                 </Text>
               </View>
               <Badge text={reading.status} tone="neutral" />
-            </View>
+            </Pressable>
           ))
         ) : (
           <EmptyState text="You have finished the current week plan." />

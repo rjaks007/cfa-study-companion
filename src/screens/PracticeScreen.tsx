@@ -46,6 +46,9 @@ export function PracticeScreen({
   answerGeneratedQuestion,
   analyzeGeneratedPractice,
   onRequestFocusBottomField,
+  targetSubject,
+  targetChapterTitle,
+  onConsumeTarget,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -64,7 +67,10 @@ export function PracticeScreen({
   ) => Promise<unknown>;
   answerGeneratedQuestion: (subject: Subject, questionId: string, selectedOption: string) => void;
   analyzeGeneratedPractice: (subject: Subject) => Promise<unknown>;
-  onRequestFocusBottomField?: () => void;
+  onRequestFocusBottomField?: (targetY?: number) => void;
+  targetSubject?: Subject;
+  targetChapterTitle?: string;
+  onConsumeTarget?: () => void;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
@@ -79,6 +85,8 @@ export function PracticeScreen({
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [assistantComposerY, setAssistantComposerY] = useState(0);
+  const [advancedY, setAdvancedY] = useState(0);
 
   useEffect(() => {
     if (!selectedSubject && parsedSubjects[0]) {
@@ -86,9 +94,19 @@ export function PracticeScreen({
     }
   }, [parsedSubjects, selectedSubject]);
 
+  useEffect(() => {
+    if (!targetSubject) return;
+    setSelectedSubject(targetSubject);
+  }, [targetSubject]);
+
   const activeUpload = uploads.find((upload) => upload.subject === selectedSubject) || null;
 
   useEffect(() => {
+    if (targetChapterTitle && activeUpload?.parsedChapters.some((chapter) => chapter.readingTitle === targetChapterTitle)) {
+      setSelectedChapter(targetChapterTitle);
+      onConsumeTarget?.();
+      return;
+    }
     if (!activeUpload) {
       setSelectedChapter("");
       return;
@@ -239,46 +257,6 @@ export function PracticeScreen({
 
   return (
     <>
-      <Panel title="Practice" icon="sparkles-outline">
-        <Text style={styles.copy}>
-          Build a practice set from your source PDFs, answer it, then let AI show exactly what to revise next.
-        </Text>
-      </Panel>
-
-      <Panel title="Upload source material" icon="folder-open-outline">
-        <Pressable style={styles.advancedHeader} onPress={() => setShowUploads((current) => !current)}>
-          <Text style={styles.cardTitle}>Notes and question bank</Text>
-          <Badge text={showUploads ? "Hide" : "Show"} tone="accent" />
-        </Pressable>
-        {showUploads ? (
-          <View style={styles.uploadStack}>
-            {uploads.map((upload) => (
-              <View key={upload.subject} style={styles.sourceCard}>
-                <View style={styles.sourceHeader}>
-                  <View style={styles.flex}>
-                    <Text style={styles.cardTitle}>{upload.subject}</Text>
-                    <Text style={styles.metaText}>
-                      {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
-                    </Text>
-                  </View>
-                  <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
-                </View>
-                <View style={styles.inlineRow}>
-                  <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
-                  <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
-                  {upload.readyForReview ? (
-                    <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
-                  ) : null}
-                </View>
-                {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.metaText}>Keep this closed while practicing so the screen stays clean.</Text>
-        )}
-      </Panel>
-
       <Panel title="Generate practice set" icon="create-outline">
         {parsedSubjects.length ? (
           <>
@@ -519,17 +497,6 @@ export function PracticeScreen({
                 compact
               />
             </View>
-            <TextInput
-              value={assistantQuestion}
-              onChangeText={setAssistantQuestion}
-              style={[uiStyles.input, styles.chatInput]}
-              placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
-              placeholderTextColor={colors.inkSoft}
-              multiline
-              onFocus={onRequestFocusBottomField}
-              onContentSizeChange={() => onRequestFocusBottomField?.()}
-            />
-            <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
             {assistantAnswer ? (
               <View style={styles.summaryCard}>
                 <Text style={styles.cardTitle}>Assistant answer</Text>
@@ -537,14 +504,75 @@ export function PracticeScreen({
                 {assistantImageUrl ? <Image source={{ uri: assistantImageUrl }} style={styles.assistantImage} resizeMode="contain" /> : null}
               </View>
             ) : null}
+            <View
+              onLayout={(event) => {
+                setAssistantComposerY(event.nativeEvent.layout.y);
+              }}
+              style={styles.summaryCard}
+            >
+              <TextInput
+                value={assistantQuestion}
+                onChangeText={setAssistantQuestion}
+                style={[uiStyles.input, styles.chatInput]}
+                placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
+                placeholderTextColor={colors.inkSoft}
+                multiline
+                onFocus={() => onRequestFocusBottomField?.(assistantComposerY)}
+                onContentSizeChange={() => onRequestFocusBottomField?.(assistantComposerY)}
+              />
+              <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
+            </View>
           </>
         ) : (
           <EmptyState text="Sync a subject with AI first." />
         )}
       </Panel>
 
-      <Panel title="Advanced" icon="settings-outline">
-        <Pressable style={styles.advancedHeader} onPress={() => setShowAdvanced((current) => !current)}>
+      <Panel title="Upload source material" icon="folder-open-outline">
+        <Pressable style={styles.advancedHeader} onPress={() => setShowUploads((current) => !current)}>
+          <Text style={styles.cardTitle}>Notes and question bank</Text>
+          <Badge text={showUploads ? "Hide" : "Show"} tone="accent" />
+        </Pressable>
+        {showUploads ? (
+          <View style={styles.uploadStack}>
+            {uploads.map((upload) => (
+              <View key={upload.subject} style={styles.sourceCard}>
+                <View style={styles.sourceHeader}>
+                  <View style={styles.flex}>
+                    <Text style={styles.cardTitle}>{upload.subject}</Text>
+                    <Text style={styles.metaText}>
+                      {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
+                    </Text>
+                  </View>
+                  <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
+                </View>
+                <View style={styles.inlineRow}>
+                  <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
+                  <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
+                  {upload.readyForReview ? (
+                    <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
+                  ) : null}
+                </View>
+                {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.metaText}>Keep this closed while practicing so the screen stays clean.</Text>
+        )}
+      </Panel>
+
+      <Panel
+        title="Advanced"
+        icon="settings-outline"
+      >
+        <Pressable
+          style={styles.advancedHeader}
+          onLayout={(event) => {
+            setAdvancedY(event.nativeEvent.layout.y);
+          }}
+          onPress={() => setShowAdvanced((current) => !current)}
+        >
           <Text style={styles.cardTitle}>Backend connection</Text>
           <Badge text={showAdvanced ? "Hide" : "Show"} tone="accent" />
         </Pressable>
@@ -559,8 +587,7 @@ export function PracticeScreen({
               placeholderTextColor={colors.inkSoft}
               autoCapitalize="none"
               autoCorrect={false}
-              onFocus={onRequestFocusBottomField}
-              onContentSizeChange={() => onRequestFocusBottomField?.()}
+              onFocus={() => onRequestFocusBottomField?.(advancedY)}
             />
           </View>
         ) : null}
