@@ -20,6 +20,7 @@ export default function App() {
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [bottomTabHeight, setBottomTabHeight] = useState(92);
   const scrollRef = useRef<any>(null);
   const study = useStudyCompanion();
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
@@ -116,7 +117,11 @@ export default function App() {
               scrollRef.current = ref;
             }}
             style={styles.screen}
-            contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
+            contentContainerStyle={[
+              styles.content,
+              keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs,
+              { paddingBottom: keyboardVisible ? 28 : bottomTabHeight + 72 },
+            ]}
             enableOnAndroid
             extraScrollHeight={140}
             extraHeight={140}
@@ -235,7 +240,12 @@ export default function App() {
           </KeyboardAwareScrollView>
 
           {!keyboardVisible ? (
-            <View style={styles.bottomTabBar}>
+            <View
+              style={styles.bottomTabBar}
+              onLayout={(event) => {
+                setBottomTabHeight(event.nativeEvent.layout.height);
+              }}
+            >
               {TABS.map((tab) => (
                 <Pressable key={tab.id} style={styles.bottomTab} onPress={() => setActiveTab(tab.id)}>
                   <View style={[styles.bottomTabIconWrap, activeTab === tab.id && styles.bottomTabIconWrapActive]}>
@@ -268,9 +278,7 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? 36 : 22,
     gap: 16,
   },
-  contentWithTabs: {
-    paddingBottom: 190,
-  },
+  contentWithTabs: {},
   contentKeyboardOpen: {
     paddingBottom: 28,
   },
