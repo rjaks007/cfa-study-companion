@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "CFA Study Companion",
+    "slug": "cfa-study-companion-mobile",
+    "scheme": "cfastudycompanion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-notifications"],
+    "android": {
+      "package": "com.akss007.cfastudycompanion"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
