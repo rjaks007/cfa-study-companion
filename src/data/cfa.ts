@@ -228,6 +228,7 @@ export function defaultUploads() {
     generatedSet: null,
     generatedAnswers: {},
     generatedReview: null,
+    practiceHistory: [],
   }));
 }
 

@@ -148,7 +148,22 @@ export interface PracticeChapter {
   readingTitle: string;
   notesSummary: string;
   revisionFocus: string[];
+  keySubtopics: string[];
+  formulas: string[];
+  commonTraps: string[];
+  questionPatterns: string[];
+  calculatorGuidance: string[];
   questions: PracticeQuestion[];
+}
+
+export interface PracticeHistoryEntry {
+  id: string;
+  chapterTitle: string;
+  difficulty: PracticeDifficulty;
+  attempted: number;
+  correct: number;
+  wrong: number;
+  date: string;
 }
 
 export interface GeneratedPracticeSet {
@@ -186,6 +201,7 @@ export interface UploadRecord {
   generatedSet: GeneratedPracticeSet | null;
   generatedAnswers: Record<string, string>;
   generatedReview: GeneratedPracticeReview | null;
+  practiceHistory: PracticeHistoryEntry[];
 }
 
 export interface MockExam {

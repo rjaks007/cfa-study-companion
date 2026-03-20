@@ -103,8 +103,9 @@ app.post(
                   "You will receive extracted text samples from a notes PDF and a question-bank PDF. " +
                   "Build a reliable chapter map from the material. Do not try to extract every raw question. " +
                   "Instead, identify likely chapters/readings, write a concise notes summary for each, list the exact concepts or formulas to revise, and include up to 5 representative source questions per chapter. " +
+                  "Also extract key subtopics that must not be forgotten, the main formulas, common traps, the style/pattern of questions that appear, and where the BA II Plus financial calculator is useful. " +
                   "Return strict JSON with this shape: " +
-                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
                   "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
               },
             ],
@@ -163,6 +164,7 @@ app.post("/api/study-chat", async (req, res) => {
               text:
                 "You are a CFA Level I study assistant inside a personal study app. " +
                 "Use the supplied notes summaries, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
+                "Assume the student uses the BA II Plus financial calculator in the exam. When a numerical topic benefits from it, say where and how the calculator is useful. " +
                 "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
                 "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
                 "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
@@ -262,12 +264,14 @@ app.post("/api/generate-practice-set", async (req, res) => {
               type: "input_text",
               text:
                 "You create CFA Level I chapter-wise practice sets from provided source material. " +
-                "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, and example questions. " +
+                "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, key subtopics, formulas, common traps, question patterns, calculator guidance, and example questions. " +
                 "Return strict JSON only with this shape: " +
                 '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"1","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
                 "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
                 "Difficulty 1 means normal concept/application. Difficulty 2 means exam-style and moderately challenging. Difficulty 3 means hard, trap-aware, and computation-ready when appropriate. " +
                 "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
+                "Use the same style and pattern of questioning suggested by the source material when possible. " +
+                "For numerical questions, mention BA II Plus usage in the explanation when it would realistically help on the exam. " +
                 "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
                 "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
                 "Do not use markdown or extra text.",
@@ -364,7 +368,7 @@ app.post("/api/analyze-practice-set", async (req, res) => {
                 "The summary should say exactly what to study next. " +
                 "reviseTopics should be short exact concepts or formulas. " +
                 "conceptExample should be a short plain-language teaching example. " +
-                "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. " +
+                "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. Mention BA II Plus usage if it helps. " +
                 "Base the advice on the actual mistakes. Do not use markdown.",
             },
           ],

@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
-import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, GeneratedPracticeReview, GeneratedPracticeSet, PracticeChapter, PracticeDifficulty, PracticeQuestion, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
+import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, GeneratedPracticeReview, GeneratedPracticeSet, PracticeChapter, PracticeDifficulty, PracticeHistoryEntry, PracticeQuestion, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
 import { calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
@@ -63,10 +63,32 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
         revisionFocus: Array.isArray(chapter?.revisionFocus)
           ? chapter.revisionFocus.map((item: unknown) => String(item).trim()).filter(Boolean)
           : [],
+        keySubtopics: Array.isArray(chapter?.keySubtopics) ? chapter.keySubtopics.map((item: unknown) => String(item).trim()).filter(Boolean) : [],
+        formulas: Array.isArray(chapter?.formulas) ? chapter.formulas.map((item: unknown) => String(item).trim()).filter(Boolean) : [],
+        commonTraps: Array.isArray(chapter?.commonTraps) ? chapter.commonTraps.map((item: unknown) => String(item).trim()).filter(Boolean) : [],
+        questionPatterns: Array.isArray(chapter?.questionPatterns) ? chapter.questionPatterns.map((item: unknown) => String(item).trim()).filter(Boolean) : [],
+        calculatorGuidance: Array.isArray(chapter?.calculatorGuidance)
+          ? chapter.calculatorGuidance.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : [],
         questions,
       };
     })
     .filter(Boolean) as PracticeChapter[];
+}
+
+function normalizePracticeHistory(value: unknown): PracticeHistoryEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry: any, index: number) => ({
+      id: typeof entry?.id === "string" ? entry.id : makeId(`practice-history-${index + 1}`),
+      chapterTitle: typeof entry?.chapterTitle === "string" ? entry.chapterTitle : "",
+      difficulty: (entry?.difficulty || "1") as PracticeDifficulty,
+      attempted: Number(entry?.attempted || 0),
+      correct: Number(entry?.correct || 0),
+      wrong: Number(entry?.wrong || 0),
+      date: typeof entry?.date === "string" ? entry.date : todayISO(),
+    }))
+    .filter((entry) => entry.chapterTitle);
 }
 
 function normalizePracticeQuestions(value: unknown): PracticeQuestion[] {
@@ -155,6 +177,7 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
     generatedSet: normalizeGeneratedSet(upload.generatedSet),
     generatedAnswers: upload.generatedAnswers || {},
     generatedReview: normalizeGeneratedReview(upload.generatedReview),
+    practiceHistory: normalizePracticeHistory(upload.practiceHistory),
   };
 }
 
@@ -733,6 +756,7 @@ export function useStudyCompanion() {
           generatedSet: null,
           generatedAnswers: {},
           generatedReview: null,
+          practiceHistory: upload.practiceHistory,
         };
         const hasNotes = Boolean(next.notesPdfName);
         const hasQBank = Boolean(next.questionBankPdfName);
@@ -834,6 +858,7 @@ export function useStudyCompanion() {
                 generatedSet: null,
                 generatedAnswers: {},
                 generatedReview: null,
+                practiceHistory: item.practiceHistory,
               }
             : item,
         ),
@@ -907,6 +932,8 @@ export function useStudyCompanion() {
         aiSummary: upload?.aiSummary || "",
         generatedSet: upload?.generatedSet,
         generatedReview: upload?.generatedReview,
+        chapterKnowledge: upload?.parsedChapters || [],
+        practiceHistory: upload?.practiceHistory || [],
         extraContext: extraContext || {},
       }),
     });
@@ -983,6 +1010,7 @@ export function useStudyCompanion() {
         mode: options?.mode || "standard",
         focusTopics: options?.focusTopics || [],
         baseQuestions: options?.baseQuestions || [],
+        practiceHistory: upload.practiceHistory,
       }),
     });
 
@@ -1061,6 +1089,13 @@ export function useStudyCompanion() {
       throw new Error("The review summary came back empty.");
     }
 
+    const attempted = upload.generatedSet.questions.filter((question) => upload.generatedAnswers[question.id]).length;
+    const correct = upload.generatedSet.questions.filter((question) => {
+      const selected = upload.generatedAnswers[question.id];
+      return selected && question.answer && selected.trim().toLowerCase() === question.answer.trim().toLowerCase();
+    }).length;
+    const wrong = Math.max(0, attempted - correct);
+
     setStudyState((current) => ({
       ...current,
       uploads: current.uploads.map((item) =>
@@ -1068,6 +1103,18 @@ export function useStudyCompanion() {
           ? {
               ...item,
               generatedReview: review,
+              practiceHistory: [
+                {
+                  id: makeId("practice-history"),
+                  chapterTitle: item.generatedSet?.chapterTitle || upload.generatedSet?.chapterTitle || "",
+                  difficulty: item.generatedSet?.difficulty || upload.generatedSet?.difficulty || "1",
+                  attempted,
+                  correct,
+                  wrong,
+                  date: todayISO(),
+                },
+                ...item.practiceHistory,
+              ],
             }
           : item,
       ),

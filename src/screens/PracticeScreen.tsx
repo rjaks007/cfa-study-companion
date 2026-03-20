@@ -127,6 +127,23 @@ export function PracticeScreen({
         return selected && question.answer && selected.trim().toLowerCase() !== question.answer.trim().toLowerCase();
       })
     : [];
+  const chapterHistory = useMemo(
+    () => activeUpload?.practiceHistory.filter((entry) => entry.chapterTitle === selectedChapter) || [],
+    [activeUpload?.practiceHistory, selectedChapter],
+  );
+  const historyByDifficulty = useMemo(
+    () =>
+      (["1", "2", "3"] as PracticeDifficulty[]).map((level) => {
+        const rows = chapterHistory.filter((entry) => entry.difficulty === level);
+        return {
+          difficulty: level,
+          attempted: rows.reduce((sum, entry) => sum + entry.attempted, 0),
+          correct: rows.reduce((sum, entry) => sum + entry.correct, 0),
+          wrong: rows.reduce((sum, entry) => sum + entry.wrong, 0),
+        };
+      }),
+    [chapterHistory],
+  );
 
   async function handlePick(subject: Subject, type: "notesPdfName" | "questionBankPdfName") {
     try {
@@ -291,6 +308,32 @@ export function PracticeScreen({
                   <View style={styles.summaryCard}>
                     <Text style={styles.cardTitle}>Chapter source</Text>
                     {activeParsedChapter.notesSummary ? <Text style={styles.metaText}>{activeParsedChapter.notesSummary}</Text> : null}
+                    {activeParsedChapter.keySubtopics.length ? (
+                      <>
+                        <Text style={styles.sectionLabel}>Must-cover topics</Text>
+                        <View style={styles.badgeWrap}>
+                          {activeParsedChapter.keySubtopics.map((topic) => (
+                            <Badge key={topic} text={topic} tone="accent" />
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+                    {activeParsedChapter.formulas.length ? (
+                      <>
+                        <Text style={styles.sectionLabel}>Core formulas</Text>
+                        <View style={styles.badgeWrap}>
+                          {activeParsedChapter.formulas.map((formula) => (
+                            <Badge key={formula} text={formula} tone="warning" />
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+                    {activeParsedChapter.calculatorGuidance.length ? (
+                      <>
+                        <Text style={styles.sectionLabel}>BA II Plus</Text>
+                        <Text style={styles.metaText}>{activeParsedChapter.calculatorGuidance.join(" ")}</Text>
+                      </>
+                    ) : null}
                     {activeParsedChapter.revisionFocus.length ? (
                       <View style={styles.badgeWrap}>
                         {activeParsedChapter.revisionFocus.map((topic) => (
@@ -300,6 +343,25 @@ export function PracticeScreen({
                     ) : null}
                   </View>
                 ) : null}
+
+                <View style={styles.summaryCard}>
+                  <Text style={styles.cardTitle}>Solved so far</Text>
+                  {chapterHistory.length ? (
+                    <View style={styles.levelSummaryWrap}>
+                      {historyByDifficulty.map((item) => (
+                        <View key={item.difficulty} style={styles.levelSummaryCard}>
+                          <Text style={styles.levelSummaryTitle}>{normalizeDifficultyLabel(item.difficulty)}</Text>
+                          <Text style={styles.metaText}>{item.attempted} solved</Text>
+                          <Text style={styles.metaText}>
+                            {item.correct} correct · {item.wrong} wrong
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.metaText}>No saved practice history for this chapter yet.</Text>
+                  )}
+                </View>
 
                 <View style={styles.configCard}>
                   <View style={styles.configRow}>
@@ -720,6 +782,21 @@ const styles = StyleSheet.create({
   },
   generatedWrap: {
     gap: 12,
+  },
+  levelSummaryWrap: {
+    gap: 10,
+  },
+  levelSummaryCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    gap: 4,
+  },
+  levelSummaryTitle: {
+    color: colors.ink,
+    fontWeight: "800",
   },
   summaryCard: {
     backgroundColor: colors.surfaceMuted,
