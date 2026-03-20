@@ -1,14 +1,4 @@
-import * as Notifications from "expo-notifications";
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+import Constants from "expo-constants";
 
 type ReminderReading = {
   id: string;
@@ -24,7 +14,32 @@ function withLocalTime(isoDate: string, hours: number) {
   return date;
 }
 
+function isExpoGo() {
+  return Constants.appOwnership === "expo";
+}
+
+async function loadNotifications() {
+  const Notifications = await import("expo-notifications");
+
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+
+  return Notifications;
+}
+
 export async function requestReviewNotificationPermission() {
+  if (isExpoGo()) {
+    return false;
+  }
+
+  const Notifications = await loadNotifications();
   const existing = await Notifications.getPermissionsAsync();
   let finalStatus = existing.status;
 
@@ -46,6 +61,11 @@ export async function requestReviewNotificationPermission() {
 }
 
 export async function scheduleReviewNotifications(readings: ReminderReading[]) {
+  if (isExpoGo()) {
+    return;
+  }
+
+  const Notifications = await loadNotifications();
   await Notifications.cancelAllScheduledNotificationsAsync();
 
   const now = new Date();

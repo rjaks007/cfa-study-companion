@@ -81,6 +81,15 @@ export function WeeklyPlanScreen({
     return filterValue === FILTER_ALL ? rows : rows.filter((reading) => reading.subject === filterValue);
   }, [FILTER_ALL, currentWeek, filterValue, readingMap, recentJump.week, weeks]);
 
+  const roadmapWeeks = useMemo(() => {
+    if (filterValue === FILTER_ALL) return weeks;
+
+    return weeks.filter((week) => {
+      if (week.week === currentWeek) return true;
+      return week.readings.some((id) => readingMap[id]?.subject === filterValue);
+    });
+  }, [FILTER_ALL, currentWeek, filterValue, readingMap, weeks]);
+
   function toggleWeek(weekNumber: number) {
     setExpandedWeeks((current) => ({ ...current, [weekNumber]: !current[weekNumber] }));
   }
@@ -193,9 +202,11 @@ export function WeeklyPlanScreen({
 
       <Panel title="Full roadmap" icon="map-outline">
         <Text style={styles.roadmapCopy}>
-          Current week is expanded by default. Open any future week to see what is coming next without losing focus on the current plan.
+          {filterValue === FILTER_ALL
+            ? "Current week is expanded by default. Open any future week to see what is coming next without losing focus on the current plan."
+            : "Showing the current week plus only the weeks where this subject appears, so the roadmap stays focused."}
         </Text>
-        {weeks.map((week) => {
+        {roadmapWeeks.map((week) => {
           const weekReadings = week.readings.map((id) => readingMap[id]).filter(Boolean);
           const filteredReadings = filterValue === FILTER_ALL ? weekReadings : weekReadings.filter((reading) => reading.subject === filterValue);
           const rows = filteredReadings.length ? filteredReadings : weekReadings;

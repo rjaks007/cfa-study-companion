@@ -953,7 +953,13 @@ export function useStudyCompanion() {
     }));
   }
 
-  async function generatePracticeSet(subject: Subject, chapterTitle: string, questionCount: number, difficulty: PracticeDifficulty) {
+  async function generatePracticeSet(
+    subject: Subject,
+    chapterTitle: string,
+    questionCount: number,
+    difficulty: PracticeDifficulty,
+    options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[] },
+  ) {
     const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
     if (!backendBaseUrl) throw new Error("Add your backend URL first.");
 
@@ -974,6 +980,9 @@ export function useStudyCompanion() {
         difficulty,
         parsedChapters: upload.parsedChapters,
         aiSummary: upload.aiSummary,
+        mode: options?.mode || "standard",
+        focusTopics: options?.focusTopics || [],
+        baseQuestions: options?.baseQuestions || [],
       }),
     });
 

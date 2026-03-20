@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { MetricCard, MiniStat } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
@@ -18,8 +18,10 @@ export default function App() {
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
   const study = useStudyCompanion();
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab);
+  const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
@@ -51,6 +53,28 @@ export default function App() {
     setWeeklyTarget({});
   }
 
+  function focusBottomField() {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 150);
+  }
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) => Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 18,
+        onPanResponderRelease: (_event, gestureState) => {
+          if (Math.abs(gestureState.dx) < 60) return;
+          if (gestureState.dx < 0 && tabIndex < TABS.length - 1) {
+            setActiveTab(TABS[tabIndex + 1].id);
+          } else if (gestureState.dx > 0 && tabIndex > 0) {
+            setActiveTab(TABS[tabIndex - 1].id);
+          }
+        },
+      }),
+    [tabIndex],
+  );
+
   if (!study.isHydrated) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -67,8 +91,9 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={styles.flex}>
+        <View style={styles.flex} {...panResponder.panHandlers}>
           <ScrollView
+            ref={scrollRef}
             style={styles.screen}
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             keyboardShouldPersistTaps="handled"
@@ -177,6 +202,7 @@ export default function App() {
             {activeTab === "practice" ? (
               <PracticeScreen
                 uploads={study.studyState.uploads}
+                readings={study.studyState.readings}
                 backendBaseUrl={study.studyState.backendBaseUrl}
                 setBackendBaseUrl={study.setBackendBaseUrl}
                 pickPdf={study.pickPdf}
@@ -186,6 +212,7 @@ export default function App() {
                 generatePracticeSet={study.generatePracticeSet}
                 answerGeneratedQuestion={study.answerGeneratedQuestion}
                 analyzeGeneratedPractice={study.analyzeGeneratedPractice}
+                onRequestFocusBottomField={focusBottomField}
               />
             ) : null}
           </ScrollView>

@@ -84,18 +84,17 @@ app.post(
         type: "input_text",
         text:
           `You are helping organize CFA Level I practice materials for ${subject}. ` +
-          "Extract as many usable questions as possible from the uploaded question bank, not just a small sample. Prioritize exhaustive extraction over long prose. Work through the full file and preserve coverage across chapters when possible. " +
-          "If notes are present, use them to infer the most likely subject and reading/chapter mapping, and create a concise revision summary for each chapter. " +
+          "Build a reliable chapter map from the uploaded material. Do not try to extract every raw question in the file. Instead, focus on identifying each chapter clearly, writing a concise notes summary, listing the exact formulas or concepts to revise, and giving a small set of representative source questions. " +
+          "If notes are present, use them to improve chapter mapping and terminology accuracy. " +
           "Return strict JSON with this shape: " +
           `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
           "The revisionFocus array should contain the exact concepts or formulas that deserve another study pass. " +
-          "Keep explanations to one short sentence max so more questions fit in the response. " +
-          "If answers are not available, leave answer as an empty string.",
+          "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string.",
       });
 
       const response = await client.responses.create({
-        model: "gpt-4.1-mini",
-        max_output_tokens: 30000,
+        model: "gpt-5.4-mini",
+        max_output_tokens: 18000,
         input: [
           {
             role: "user",
@@ -107,7 +106,7 @@ app.post(
       res.json({
         ok: true,
         subject,
-        model: "gpt-4.1-mini",
+        model: "gpt-5.4-mini",
         output_text: response.output_text,
         raw: response,
       });
@@ -132,7 +131,7 @@ app.post("/api/study-chat", async (req, res) => {
     const wantsVisual = /diagram|visual|image|draw|chart|timeline|map/i.test(String(question));
 
     const response = await client.responses.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-5.4-mini",
       input: [
         {
           role: "system",
@@ -141,10 +140,11 @@ app.post("/api/study-chat", async (req, res) => {
               type: "input_text",
               text:
                 "You are a CFA Level I study assistant inside a personal study app. " +
-                "Use the supplied notes summaries, parsed chapters, and performance summary to answer clearly, practically, and briefly. " +
-                "Do not use markdown bullets, asterisks, or code fences. " +
-                "Write in clean short paragraphs. " +
+                "Use the supplied notes summaries, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
+                "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
+                "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
                 "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
+                "When helpful, explain why the student's choice was wrong and what concept it confused. " +
                 "End with a short 'Revise next:' line only when useful.",
             },
           ],
@@ -212,6 +212,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
       difficulty = "1",
       parsedChapters = [],
       aiSummary = "",
+      mode = "standard",
+      focusTopics = [],
+      baseQuestions = [],
     } = req.body || {};
 
     if (!String(chapterTitle).trim()) {
@@ -228,7 +231,7 @@ app.post("/api/generate-practice-set", async (req, res) => {
     }
 
     const response = await client.responses.create({
-      model: "gpt-4.1",
+      model: "gpt-5.4",
       input: [
         {
           role: "system",
@@ -242,6 +245,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
                 '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"1","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
                 "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
                 "Difficulty 1 means normal concept/application. Difficulty 2 means exam-style and moderately challenging. Difficulty 3 means hard, trap-aware, and computation-ready when appropriate. " +
+                "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
+                "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
+                "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
                 "Do not use markdown or extra text.",
             },
           ],
@@ -256,6 +262,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
                 chapterTitle,
                 questionCount: cappedCount,
                 difficulty,
+                mode,
+                focusTopics,
+                baseQuestions,
                 aiSummary,
                 chapter,
               }),
@@ -318,7 +327,7 @@ app.post("/api/analyze-practice-set", async (req, res) => {
     const incorrect = answeredQuestions.filter((question) => !question.correct);
 
     const response = await client.responses.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-5.4-mini",
       input: [
         {
           role: "system",
@@ -334,7 +343,7 @@ app.post("/api/analyze-practice-set", async (req, res) => {
                 "reviseTopics should be short exact concepts or formulas. " +
                 "conceptExample should be a short plain-language teaching example. " +
                 "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. " +
-                "Do not use markdown.",
+                "Base the advice on the actual mistakes. Do not use markdown.",
             },
           ],
         },

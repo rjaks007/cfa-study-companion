@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, uiStyles } from "../components/ui";
 import { colors } from "../theme";
-import { PracticeDifficulty, Subject, UploadRecord } from "../types";
+import { PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
 
 function normalizeDifficultyLabel(value: PracticeDifficulty) {
   if (value === "1") return "Level 1 · Normal";
@@ -35,6 +35,7 @@ function generatedSummary(upload: UploadRecord) {
 
 export function PracticeScreen({
   uploads,
+  readings,
   backendBaseUrl,
   setBackendBaseUrl,
   pickPdf,
@@ -44,17 +45,26 @@ export function PracticeScreen({
   generatePracticeSet,
   answerGeneratedQuestion,
   analyzeGeneratedPractice,
+  onRequestFocusBottomField,
 }: {
   uploads: UploadRecord[];
+  readings: Reading[];
   backendBaseUrl: string;
   setBackendBaseUrl: (value: string) => void;
   pickPdf: (subject: Subject, type: "notesPdfName" | "questionBankPdfName") => Promise<boolean>;
   syncSubjectWithAi: (subject: Subject) => Promise<unknown>;
   syncingSubject: Subject | null;
   askPracticeAssistant: (subject: Subject, question: string, extraContext?: Record<string, unknown>) => Promise<{ answer: string; imageUrl: string }>;
-  generatePracticeSet: (subject: Subject, chapterTitle: string, questionCount: number, difficulty: PracticeDifficulty) => Promise<unknown>;
+  generatePracticeSet: (
+    subject: Subject,
+    chapterTitle: string,
+    questionCount: number,
+    difficulty: PracticeDifficulty,
+    options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[] },
+  ) => Promise<unknown>;
   answerGeneratedQuestion: (subject: Subject, questionId: string, selectedOption: string) => void;
   analyzeGeneratedPractice: (subject: Subject) => Promise<unknown>;
+  onRequestFocusBottomField?: () => void;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
@@ -62,6 +72,7 @@ export function PracticeScreen({
   const [questionCount, setQuestionCount] = useState("10");
   const [difficulty, setDifficulty] = useState<PracticeDifficulty>("1");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showUploads, setShowUploads] = useState(false);
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState("");
   const [assistantImageUrl, setAssistantImageUrl] = useState("");
@@ -89,6 +100,15 @@ export function PracticeScreen({
 
   const generatedStats = useMemo(() => (activeUpload ? generatedSummary(activeUpload) : { total: 0, answered: 0, correct: 0, wrong: 0, accuracy: 0 }), [activeUpload]);
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
+  const activeReading = readings.find((reading) => reading.subject === selectedSubject && reading.title === selectedChapter) || null;
+  const confidencePercent = activeReading ? activeReading.confidence * 10 : 0;
+  const confidenceGap = activeReading && generatedStats.answered ? confidencePercent - generatedStats.accuracy : 0;
+  const wrongGeneratedQuestions = activeUpload?.generatedSet
+    ? activeUpload.generatedSet.questions.filter((question) => {
+        const selected = activeUpload.generatedAnswers[question.id];
+        return selected && question.answer && selected.trim().toLowerCase() !== question.answer.trim().toLowerCase();
+      })
+    : [];
 
   async function handlePick(subject: Subject, type: "notesPdfName" | "questionBankPdfName") {
     try {
@@ -137,7 +157,11 @@ export function PracticeScreen({
     if (!selectedSubject || !assistantQuestion.trim()) return;
     try {
       setAssistantLoading(true);
-      const result = await askPracticeAssistant(selectedSubject, assistantQuestion.trim());
+      const result = await askPracticeAssistant(selectedSubject, assistantQuestion.trim(), {
+        chapterTitle: selectedChapter,
+        generatedReview: activeUpload?.generatedReview,
+        confidence: activeReading?.confidence || 0,
+      });
       setAssistantAnswer(result.answer);
       setAssistantImageUrl(result.imageUrl);
     } catch (error) {
@@ -147,36 +171,112 @@ export function PracticeScreen({
     }
   }
 
+  async function runAssistantPreset(prompt: string, extraContext?: Record<string, unknown>) {
+    if (!selectedSubject) return;
+    try {
+      setAssistantLoading(true);
+      setAssistantQuestion(prompt);
+      const result = await askPracticeAssistant(selectedSubject, prompt, {
+        chapterTitle: selectedChapter,
+        generatedReview: activeUpload?.generatedReview,
+        generatedSet: activeUpload?.generatedSet,
+        confidence: activeReading?.confidence || 0,
+        ...extraContext,
+      });
+      setAssistantAnswer(result.answer);
+      setAssistantImageUrl(result.imageUrl);
+    } catch (error) {
+      Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
+    } finally {
+      setAssistantLoading(false);
+    }
+  }
+
+  async function explainWrongAnswer(question: PracticeQuestion) {
+    const selected = activeUpload?.generatedAnswers[question.id] || "";
+    if (!selectedSubject || !selected) return;
+    await runAssistantPreset(`Explain why my answer was wrong in ${question.question}`, {
+      mode: "explain-wrong-answer",
+      chapterTitle: selectedChapter,
+      wrongQuestion: question,
+      selectedAnswer: selected,
+    });
+  }
+
+  async function generateSimilarFive() {
+    if (!selectedSubject || !selectedChapter) return;
+    try {
+      setGenerating(true);
+      await generatePracticeSet(selectedSubject, selectedChapter, 5, difficulty, {
+        mode: "similar-questions",
+        focusTopics: activeUpload?.generatedReview?.reviseTopics || [],
+        baseQuestions: wrongGeneratedQuestions.slice(0, 5),
+      });
+      Alert.alert("Ready", "Five similar reinforcement questions are ready below.");
+    } catch (error) {
+      Alert.alert("Generation failed", error instanceof Error ? error.message : "Similar questions could not be created.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function retryWeakTopics() {
+    if (!selectedSubject || !selectedChapter) return;
+    try {
+      setGenerating(true);
+      await generatePracticeSet(selectedSubject, selectedChapter, Number(questionCount || 10), difficulty, {
+        mode: "weak-topics-retry",
+        focusTopics: activeUpload?.generatedReview?.reviseTopics || [],
+        baseQuestions: wrongGeneratedQuestions,
+      });
+      Alert.alert("Ready", "A weak-topic retry set is ready below.");
+    } catch (error) {
+      Alert.alert("Generation failed", error instanceof Error ? error.message : "Weak-topic retry could not be created.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   return (
     <>
       <Panel title="Practice" icon="sparkles-outline">
         <Text style={styles.copy}>
-          Use uploaded notes and question-bank PDFs as the source. Then generate a fresh set by chapter, choose how many questions you want, and get a study review after you finish.
+          Build a practice set from your source PDFs, answer it, then let AI show exactly what to revise next.
         </Text>
       </Panel>
 
-      <Panel title="Source material" icon="folder-open-outline">
-        {uploads.map((upload) => (
-          <View key={upload.subject} style={styles.sourceCard}>
-            <View style={styles.sourceHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.cardTitle}>{upload.subject}</Text>
-                <Text style={styles.metaText}>
-                  {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
-                </Text>
+      <Panel title="Upload source material" icon="folder-open-outline">
+        <Pressable style={styles.advancedHeader} onPress={() => setShowUploads((current) => !current)}>
+          <Text style={styles.cardTitle}>Notes and question bank</Text>
+          <Badge text={showUploads ? "Hide" : "Show"} tone="accent" />
+        </Pressable>
+        {showUploads ? (
+          <View style={styles.uploadStack}>
+            {uploads.map((upload) => (
+              <View key={upload.subject} style={styles.sourceCard}>
+                <View style={styles.sourceHeader}>
+                  <View style={styles.flex}>
+                    <Text style={styles.cardTitle}>{upload.subject}</Text>
+                    <Text style={styles.metaText}>
+                      {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
+                    </Text>
+                  </View>
+                  <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
+                </View>
+                <View style={styles.inlineRow}>
+                  <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
+                  <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
+                  {upload.readyForReview ? (
+                    <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
+                  ) : null}
+                </View>
+                {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
               </View>
-              <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
-            </View>
-            <View style={styles.inlineRow}>
-              <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
-              <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
-              {upload.readyForReview ? (
-                <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
-              ) : null}
-            </View>
-            {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
+            ))}
           </View>
-        ))}
+        ) : (
+          <Text style={styles.metaText}>Keep this closed while practicing so the screen stays clean.</Text>
+        )}
       </Panel>
 
       <Panel title="Generate practice set" icon="create-outline">
@@ -272,6 +372,25 @@ export function PracticeScreen({
               </View>
             </View>
 
+            {activeReading && generatedStats.answered ? (
+              <View style={styles.summaryCard}>
+                <Text style={styles.cardTitle}>Confidence calibration</Text>
+                <Text style={styles.metaText}>
+                  You rated this chapter at {activeReading.confidence}/10, while your current set score is {generatedStats.accuracy}%.
+                </Text>
+                <Badge
+                  text={
+                    Math.abs(confidenceGap) <= 10
+                      ? "Confidence and score are aligned"
+                      : confidenceGap > 10
+                        ? "You may be overconfident here"
+                        : "You may know more than your confidence suggests"
+                  }
+                  tone={Math.abs(confidenceGap) <= 10 ? "success" : confidenceGap > 10 ? "warning" : "accent"}
+                />
+              </View>
+            ) : null}
+
             {activeUpload.generatedSet.questions.map((question, index) => {
               const selected = activeUpload.generatedAnswers[question.id];
               const isCorrect = selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
@@ -300,6 +419,11 @@ export function PracticeScreen({
                       <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
                       {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
                       {question.explanation ? <Text style={styles.feedbackLine}>{question.explanation}</Text> : null}
+                      {!isCorrect && question.answer ? (
+                        <Pressable style={styles.inlineLink} onPress={() => void explainWrongAnswer(question)}>
+                          <Text style={styles.inlineLinkText}>Explain why this answer is wrong</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>
@@ -337,6 +461,10 @@ export function PracticeScreen({
                 <Text style={styles.metaText}>{activeUpload.generatedReview.numericalExample}</Text>
               </View>
             ) : null}
+            <View style={styles.inlineRow}>
+              <ActionButton label={generating ? "Working..." : "Generate 5 similar"} icon="repeat-outline" onPress={() => void generateSimilarFive()} compact />
+              <ActionButton label={generating ? "Working..." : "Retry weak topics"} icon="refresh-outline" onPress={() => void retryWeakTopics()} compact />
+            </View>
           </View>
         ) : (
           <EmptyState text="Finish a generated set, then analyze it to get your weak-topic study summary." />
@@ -349,6 +477,48 @@ export function PracticeScreen({
         </Text>
         {selectedSubject ? (
           <>
+            <View style={styles.inlineRow}>
+              <ActionButton
+                label="Formula drill mode"
+                icon="calculator-outline"
+                onPress={() =>
+                  void runAssistantPreset(`Create a formula drill for ${selectedChapter || selectedSubject}. Show the key formulas, when to use them, and one quick recall check for each.`, {
+                    mode: "formula-drill",
+                  })
+                }
+                compact
+              />
+              <ActionButton
+                label="Exam coach mode"
+                icon="school-outline"
+                onPress={() =>
+                  void runAssistantPreset(`Coach me for exam-style questions in ${selectedChapter || selectedSubject}. Tell me the common traps, time-saving approach, and how to think under pressure.`, {
+                    mode: "exam-coach",
+                  })
+                }
+                compact
+              />
+              <ActionButton
+                label="Chat with my notes"
+                icon="book-outline"
+                onPress={() =>
+                  void runAssistantPreset(`Use my uploaded notes for ${selectedChapter || selectedSubject} and tell me the most important ideas in plain language.`, {
+                    mode: "chat-with-notes",
+                  })
+                }
+                compact
+              />
+              <ActionButton
+                label="Revision sheet"
+                icon="document-text-outline"
+                onPress={() =>
+                  void runAssistantPreset(`Create a one-page revision sheet for ${selectedChapter || selectedSubject}. Include the exact concepts, formulas, and traps I should revise next.`, {
+                    mode: "revision-sheet",
+                  })
+                }
+                compact
+              />
+            </View>
             <TextInput
               value={assistantQuestion}
               onChangeText={setAssistantQuestion}
@@ -356,6 +526,8 @@ export function PracticeScreen({
               placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
               placeholderTextColor={colors.inkSoft}
               multiline
+              onFocus={onRequestFocusBottomField}
+              onContentSizeChange={() => onRequestFocusBottomField?.()}
             />
             <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
             {assistantAnswer ? (
@@ -387,6 +559,8 @@ export function PracticeScreen({
               placeholderTextColor={colors.inkSoft}
               autoCapitalize="none"
               autoCorrect={false}
+              onFocus={onRequestFocusBottomField}
+              onContentSizeChange={() => onRequestFocusBottomField?.()}
             />
           </View>
         ) : null}
@@ -406,6 +580,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 18,
     padding: 14,
+    gap: 10,
+  },
+  uploadStack: {
     gap: 10,
   },
   sourceHeader: {
@@ -589,6 +766,15 @@ const styles = StyleSheet.create({
   feedbackLine: {
     color: colors.inkSoft,
     lineHeight: 18,
+  },
+  inlineLink: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+  },
+  inlineLinkText: {
+    color: colors.primary,
+    fontWeight: "700",
+    fontSize: 13,
   },
   exampleCard: {
     backgroundColor: colors.surface,
