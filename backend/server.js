@@ -2,7 +2,8 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
-import OpenAI, { toFile } from "openai";
+import OpenAI from "openai";
+import pdf from "pdf-parse";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -33,6 +34,29 @@ function parseStructuredOutput(text) {
   }
 }
 
+async function extractPdfText(buffer) {
+  const result = await pdf(buffer);
+  return String(result.text || "").replace(/\s+/g, " ").trim();
+}
+
+function sampleTextAcrossDocument(text, totalChars = 50000, slices = 6) {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+  if (clean.length <= totalChars) return clean;
+
+  const segmentLength = Math.floor(totalChars / slices);
+  const step = Math.floor((clean.length - segmentLength) / Math.max(1, slices - 1));
+  const sampled = [];
+
+  for (let index = 0; index < slices; index += 1) {
+    const start = Math.max(0, Math.min(clean.length - segmentLength, index * step));
+    const end = start + segmentLength;
+    sampled.push(clean.slice(start, end));
+  }
+
+  return sampled.join("\n\n");
+}
+
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -57,48 +81,44 @@ app.post(
         return res.status(400).json({ error: "questionBank PDF is required." });
       }
 
-      const inputContent = [];
+      const notesText = notesFile ? await extractPdfText(notesFile.buffer) : "";
+      const questionBankText = await extractPdfText(questionBankFile.buffer);
 
-      if (notesFile) {
-        const uploadedNotes = await client.files.create({
-          file: await toFile(notesFile.buffer, notesFile.originalname, { type: notesFile.mimetype }),
-          purpose: "user_data",
-        });
-        inputContent.push({
-          type: "input_file",
-          file_id: uploadedNotes.id,
-        });
-      }
-
-      const uploadedQuestionBank = await client.files.create({
-        file: await toFile(questionBankFile.buffer, questionBankFile.originalname, { type: questionBankFile.mimetype }),
-        purpose: "user_data",
-      });
-
-      inputContent.push({
-        type: "input_file",
-        file_id: uploadedQuestionBank.id,
-      });
-
-      inputContent.push({
-        type: "input_text",
-        text:
-          `You are helping organize CFA Level I practice materials for ${subject}. ` +
-          "Build a reliable chapter map from the uploaded material. Do not try to extract every raw question in the file. Instead, focus on identifying each chapter clearly, writing a concise notes summary, listing the exact formulas or concepts to revise, and giving a small set of representative source questions. " +
-          "If notes are present, use them to improve chapter mapping and terminology accuracy. " +
-          "Return strict JSON with this shape: " +
-          `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
-          "The revisionFocus array should contain the exact concepts or formulas that deserve another study pass. " +
-          "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string.",
-      });
+      const compactNotes = sampleTextAcrossDocument(notesText, 14000, 2);
+      const compactQuestionBank = sampleTextAcrossDocument(questionBankText, 52000, 6);
 
       const response = await client.responses.create({
         model: "gpt-5.4-mini",
-        max_output_tokens: 18000,
+        max_output_tokens: 12000,
         input: [
           {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  `You are helping organize CFA Level I practice materials for ${subject}. ` +
+                  "You will receive extracted text samples from a notes PDF and a question-bank PDF. " +
+                  "Build a reliable chapter map from the material. Do not try to extract every raw question. " +
+                  "Instead, identify likely chapters/readings, write a concise notes summary for each, list the exact concepts or formulas to revise, and include up to 5 representative source questions per chapter. " +
+                  "Return strict JSON with this shape: " +
+                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+                  "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
+              },
+            ],
+          },
+          {
             role: "user",
-            content: inputContent,
+            content: [
+              {
+                type: "input_text",
+                text: JSON.stringify({
+                  subject,
+                  notesExcerpt: compactNotes,
+                  questionBankExcerpt: compactQuestionBank,
+                }),
+              },
+            ],
           },
         ],
       });
