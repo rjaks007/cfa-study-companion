@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
-import pdf from "pdf-parse";
+import * as pdfParse from "pdf-parse";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -35,7 +35,8 @@ function parseStructuredOutput(text) {
 }
 
 async function extractPdfText(buffer) {
-  const result = await pdf(buffer);
+  const parser = pdfParse.default || pdfParse;
+  const result = await parser(buffer);
   return String(result.text || "").replace(/\s+/g, " ").trim();
 }
 
