@@ -860,7 +860,10 @@ export function useStudyCompanion() {
       throw new Error(payload?.details || payload?.error || "Study assistant request failed.");
     }
 
-    return String(payload.answer || "").trim();
+    return {
+      answer: String(payload.answer || "").trim(),
+      imageUrl: payload.imageUrl ? String(payload.imageUrl) : "",
+    };
   }
 
   function answerPracticeQuestion(subject: Subject, questionId: string, selectedOption: string) {

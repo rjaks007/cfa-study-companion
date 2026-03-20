@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Badge, EmptyState, InfoBlock, Panel, ProgressBar, uiStyles } from "../components/ui";
+import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
 import { formatShortDate } from "../utils/study";
 
@@ -15,8 +15,6 @@ type ReadingItem = {
 };
 
 export function OverviewScreen({
-  currentWeek,
-  syllabusProgress,
   weekProgress,
   dueTomorrowReadings,
   overdueReadings,
@@ -25,8 +23,6 @@ export function OverviewScreen({
   onEnableNotifications,
   onOpenWeekly,
 }: {
-  currentWeek: number;
-  syllabusProgress: number;
   weekProgress: { done: number; total: number; percent: number };
   dueTomorrowReadings: ReadingItem[];
   overdueReadings: ReadingItem[];
@@ -39,21 +35,16 @@ export function OverviewScreen({
 
   return (
     <>
-      <Panel title="Overview" icon="home-outline">
-        <View style={uiStyles.twoUp}>
-          <InfoBlock label="Current week" value={`Week ${currentWeek}`} />
-          <InfoBlock label="Syllabus" value={`${syllabusProgress}%`} />
-          <InfoBlock label="This week" value={`${weekProgress.done}/${weekProgress.total || 0}`} />
-          <InfoBlock label="Due tomorrow" value={String(dueTomorrowReadings.length)} />
-        </View>
-
-        <View style={styles.progressWrap}>
+      <Panel title="Today" icon="sunny-outline">
+        <View style={styles.summaryCard}>
           <Text style={styles.sectionTitle}>This week completion</Text>
           <ProgressBar progress={weekProgress.percent} />
-          <Text style={styles.progressMeta}>{weekProgress.percent}% complete</Text>
+          <Text style={styles.metaText}>
+            {weekProgress.done}/{weekProgress.total || 0} readings done this week
+          </Text>
         </View>
 
-        <View style={styles.priorityCard}>
+        <View style={styles.summaryCard}>
           <Text style={styles.sectionTitle}>Next priority</Text>
           {nextPriority ? (
             <>
@@ -67,23 +58,21 @@ export function OverviewScreen({
               </View>
             </>
           ) : (
-            <Text style={styles.progressMeta}>No immediate priority. You are caught up.</Text>
+            <Text style={styles.metaText}>No immediate priority. You are caught up.</Text>
           )}
-          <View style={styles.actionRow}>
-            <Pressable style={styles.jumpButton} onPress={onOpenWeekly}>
-              <Text style={styles.jumpButtonText}>Open weekly plan</Text>
-            </Pressable>
-            <Pressable style={[styles.jumpButton, styles.secondaryButton]} onPress={() => void onEnableNotifications()}>
-              <Text style={[styles.jumpButtonText, styles.secondaryButtonText]}>
-                {notificationsEnabled ? "Reminders on" : "Enable reminders"}
-              </Text>
-            </Pressable>
-          </View>
+        </View>
+
+        <View style={styles.actionRow}>
+          <Pressable style={styles.primaryButton} onPress={onOpenWeekly}>
+            <Text style={styles.primaryButtonText}>Open weekly plan</Text>
+          </Pressable>
+          <Pressable style={styles.secondaryButton} onPress={() => void onEnableNotifications()}>
+            <Text style={styles.secondaryButtonText}>{notificationsEnabled ? "Reminders on" : "Enable reminders"}</Text>
+          </Pressable>
         </View>
       </Panel>
 
-      <Panel title="Today’s plan" icon="sunny-outline">
-        <Text style={styles.sectionTitle}>Study now</Text>
+      <Panel title="Study now" icon="book-outline">
         {todayPlan.current.length ? (
           todayPlan.current.map((reading) => (
             <View key={reading.id} style={styles.rowCard}>
@@ -99,8 +88,10 @@ export function OverviewScreen({
         ) : (
           <EmptyState text="You have finished the current week plan." />
         )}
+      </Panel>
 
-        <Text style={styles.sectionTitle}>Review due tomorrow</Text>
+      <Panel title="Reviews" icon="notifications-outline">
+        <Text style={styles.sectionTitle}>Due tomorrow</Text>
         {dueTomorrowReadings.length ? (
           dueTomorrowReadings.slice(0, 4).map((reading) => (
             <View key={reading.id} style={styles.rowCard}>
@@ -117,7 +108,7 @@ export function OverviewScreen({
           <EmptyState text="No reviews are due tomorrow." />
         )}
 
-        <Text style={styles.sectionTitle}>Overdue reviews</Text>
+        <Text style={styles.sectionTitle}>Overdue</Text>
         {overdueReadings.length ? (
           overdueReadings.slice(0, 4).map((reading) => (
             <View key={reading.id} style={styles.rowCard}>
@@ -139,7 +130,12 @@ export function OverviewScreen({
 }
 
 const styles = StyleSheet.create({
-  progressWrap: {
+  summaryCard: {
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    padding: 14,
     gap: 8,
   },
   sectionTitle: {
@@ -147,17 +143,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
   },
-  progressMeta: {
+  metaText: {
     color: colors.inkSoft,
     fontSize: 12,
-  },
-  priorityCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 18,
-    padding: 14,
-    gap: 8,
   },
   priorityTitle: {
     color: colors.ink,
@@ -173,29 +161,32 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
   },
-  jumpButton: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  jumpButtonText: {
-    color: colors.surface,
-    fontWeight: "800",
-  },
   actionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
   },
+  primaryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  primaryButtonText: {
+    color: colors.surface,
+    fontWeight: "800",
+  },
   secondaryButton: {
     backgroundColor: colors.surface,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   secondaryButtonText: {
     color: colors.ink,
+    fontWeight: "800",
   },
   rowCard: {
     flexDirection: "row",

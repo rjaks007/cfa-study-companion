@@ -16,6 +16,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
   const [studySetupDate, setStudySetupDate] = useState("");
+  const [setupExpanded, setSetupExpanded] = useState(false);
   const study = useStudyCompanion();
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab);
 
@@ -55,9 +56,9 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={styles.flex}>
-          <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+          <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             {activeTab === "overview" ? (
               <View style={styles.hero}>
                 <View style={styles.heroBadge}>
@@ -74,30 +75,35 @@ export default function App() {
                   <MetricCard label="This week" value={`${study.weekProgress.done}/${study.weekProgress.total || 0}`} icon="list-outline" />
                   <MetricCard label="Due tomorrow" value={String(study.dueTomorrowReadings.length)} icon="notifications-outline" />
                 </View>
-                <View style={styles.setupCard}>
-                  <Text style={styles.sectionLabel}>Study setup</Text>
-                  <TextInput
-                    value={studySetupDate}
-                    onChangeText={setStudySetupDate}
-                    onBlur={() => {
-                      const parsed = parseInputDate(studySetupDate);
-                      if (parsed) {
-                        study.setStartDate(parsed);
-                        setStudySetupDate(formatInputDate(parsed));
-                      } else {
-                        setStudySetupDate(formatInputDate(study.studyState.startDate));
-                      }
-                    }}
-                    style={styles.input}
-                    placeholder="DD/MM/YYYY"
-                    placeholderTextColor={colors.inkSoft}
-                  />
+                <Pressable style={styles.setupCard} onPress={() => setSetupExpanded((current) => !current)}>
+                  <View style={styles.setupHeader}>
+                    <Text style={styles.sectionLabel}>Study setup</Text>
+                    <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
+                  </View>
                   <View style={styles.setupStatsRow}>
                     <MiniStat label="Plan end" value={formatInputDate(study.planEndDate)} />
                     <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
                     <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
                   </View>
-                </View>
+                  {setupExpanded ? (
+                    <TextInput
+                      value={studySetupDate}
+                      onChangeText={setStudySetupDate}
+                      onBlur={() => {
+                        const parsed = parseInputDate(studySetupDate);
+                        if (parsed) {
+                          study.setStartDate(parsed);
+                          setStudySetupDate(formatInputDate(parsed));
+                        } else {
+                          setStudySetupDate(formatInputDate(study.studyState.startDate));
+                        }
+                      }}
+                      style={styles.input}
+                      placeholder="DD/MM/YYYY"
+                      placeholderTextColor={colors.inkSoft}
+                    />
+                  ) : null}
+                </Pressable>
               </View>
             ) : (
               <View style={styles.compactHeader}>
@@ -114,8 +120,6 @@ export default function App() {
 
             {activeTab === "overview" ? (
               <OverviewScreen
-                currentWeek={study.currentWeek}
-                syllabusProgress={study.syllabusProgress}
                 weekProgress={study.weekProgress}
                 dueTomorrowReadings={study.dueTomorrowReadings}
                 overdueReadings={study.overdueReadings}
@@ -162,11 +166,11 @@ export default function App() {
                 setBackendBaseUrl={study.setBackendBaseUrl}
                 pickPdf={study.pickPdf}
                 syncSubjectWithAi={study.syncSubjectWithAi}
-              syncingSubject={study.syncingSubject}
-              answerPracticeQuestion={study.answerPracticeQuestion}
-              resetPracticeAnswers={study.resetPracticeAnswers}
-              askPracticeAssistant={study.askPracticeAssistant}
-            />
+                syncingSubject={study.syncingSubject}
+                answerPracticeQuestion={study.answerPracticeQuestion}
+                resetPracticeAnswers={study.resetPracticeAnswers}
+                askPracticeAssistant={study.askPracticeAssistant}
+              />
             ) : null}
           </ScrollView>
 
@@ -201,7 +205,7 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingTop: Platform.OS === "android" ? 30 : 22,
     gap: 16,
-    paddingBottom: 110,
+    paddingBottom: 130,
   },
   loadingWrap: {
     flex: 1,
@@ -258,6 +262,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 14,
     gap: 12,
+  },
+  setupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   sectionLabel: {
     fontSize: 13,

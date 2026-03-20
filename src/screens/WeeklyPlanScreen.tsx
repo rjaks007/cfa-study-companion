@@ -41,12 +41,14 @@ export function WeeklyPlanScreen({
   targetReadingId?: string;
   onConsumeTarget?: () => void;
 }) {
+  const FILTER_ALL = "All subjects";
   const [expandedReadingId, setExpandedReadingId] = useState<string>("");
   const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>(
     Object.fromEntries(weeks.map((week) => [week.week, week.week === currentWeek])),
   );
   const [customDate, setCustomDate] = useState<Record<string, string>>({});
   const [recentJump, setRecentJump] = useState<{ week?: number; readingId?: string }>({});
+  const [filterValue, setFilterValue] = useState<string>(selectedSubject);
 
   useEffect(() => {
     if (!targetWeek && !targetReadingId) return;
@@ -68,12 +70,16 @@ export function WeeklyPlanScreen({
     onConsumeTarget?.();
   }, [onConsumeTarget, targetReadingId, targetWeek]);
 
+  useEffect(() => {
+    setFilterValue(selectedSubject);
+  }, [selectedSubject]);
+
   const currentWeekReadings = useMemo(() => {
     const baseWeek = recentJump.week || currentWeek;
     const week = weeks.find((item) => item.week === baseWeek);
     const rows = (week?.readings || []).map((id) => readingMap[id]).filter(Boolean);
-    return rows.filter((reading) => reading.subject === selectedSubject);
-  }, [currentWeek, readingMap, recentJump.week, selectedSubject, weeks]);
+    return filterValue === FILTER_ALL ? rows : rows.filter((reading) => reading.subject === filterValue);
+  }, [FILTER_ALL, currentWeek, filterValue, readingMap, recentJump.week, weeks]);
 
   function toggleWeek(weekNumber: number) {
     setExpandedWeeks((current) => ({ ...current, [weekNumber]: !current[weekNumber] }));
@@ -142,7 +148,14 @@ export function WeeklyPlanScreen({
     <>
       <Panel title="Weekly plan" icon="calendar-outline">
         <FieldLabel label="Subject filter" />
-        <ChipSelector options={SUBJECT_ORDER} value={selectedSubject} onChange={(value) => setSelectedSubject(value as Subject)} />
+        <ChipSelector
+          options={[FILTER_ALL, ...SUBJECT_ORDER]}
+          value={filterValue}
+          onChange={(value) => {
+            setFilterValue(value);
+            if (value !== FILTER_ALL) setSelectedSubject(value as Subject);
+          }}
+        />
 
         <View style={styles.resetRow}>
           <Pressable
@@ -170,20 +183,11 @@ export function WeeklyPlanScreen({
         </View>
       </Panel>
 
-      {recentJump.week ? (
-        <View style={styles.jumpBanner}>
-          <Text style={styles.jumpBannerTitle}>Opened from Progress</Text>
-          <Text style={styles.jumpBannerCopy}>
-            Week {recentJump.week} was opened and highlighted below. Weekly Plan is back to normal, so you can move around freely.
-          </Text>
-        </View>
-      ) : null}
-
-      <Panel title={`Week ${recentJump.week || currentWeek} snapshot`} icon="today-outline">
+      <Panel title={`Week ${recentJump.week || currentWeek}`} icon="today-outline">
         {currentWeekReadings.length ? (
           currentWeekReadings.map(renderReadingCard)
         ) : (
-          <EmptyState text="No readings found in this week for the selected subject." />
+          <EmptyState text="No readings found in this week for the selected filter." />
         )}
       </Panel>
 
@@ -193,7 +197,7 @@ export function WeeklyPlanScreen({
         </Text>
         {weeks.map((week) => {
           const weekReadings = week.readings.map((id) => readingMap[id]).filter(Boolean);
-          const filteredReadings = weekReadings.filter((reading) => reading.subject === selectedSubject);
+          const filteredReadings = filterValue === FILTER_ALL ? weekReadings : weekReadings.filter((reading) => reading.subject === filterValue);
           const rows = filteredReadings.length ? filteredReadings : weekReadings;
           const done = rows.filter((reading) => reading.status === "done").length;
           const progress = rows.length ? Math.round((done / rows.length) * 100) : 0;
@@ -333,22 +337,6 @@ const styles = StyleSheet.create({
   },
   statusWrap: {
     justifyContent: "center",
-  },
-  jumpBanner: {
-    backgroundColor: colors.surface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.accentSoft,
-    padding: 14,
-    gap: 6,
-  },
-  jumpBannerTitle: {
-    color: colors.accent,
-    fontWeight: "800",
-  },
-  jumpBannerCopy: {
-    color: colors.inkSoft,
-    lineHeight: 19,
   },
   quickRow: {
     flexDirection: "row",

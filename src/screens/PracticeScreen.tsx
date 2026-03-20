@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { PracticeChapter, Subject, UploadRecord } from "../types";
@@ -22,7 +22,7 @@ function computeChapterScore(chapter: PracticeChapter, answers: Record<string, s
     answered,
     correct,
     wrong,
-    accuracy: answered && correct >= 0 ? Math.round((correct / Math.max(answered, 1)) * 100) : 0,
+    accuracy: answered ? Math.round((correct / answered) * 100) : 0,
   };
 }
 
@@ -38,10 +38,7 @@ function computeOverallSummary(upload: UploadRecord) {
   const totalWrong = chapterRows.reduce((sum, row) => sum + row.stats.wrong, 0);
   const weakest = [...chapterRows]
     .filter((row) => row.stats.answered > 0)
-    .sort((left, right) => {
-      if (left.stats.accuracy === right.stats.accuracy) return right.stats.wrong - left.stats.wrong;
-      return left.stats.accuracy - right.stats.accuracy;
-    })[0];
+    .sort((left, right) => right.stats.wrong - left.stats.wrong || left.stats.accuracy - right.stats.accuracy)[0];
 
   return {
     totalQuestions,
@@ -55,24 +52,17 @@ function computeOverallSummary(upload: UploadRecord) {
 
 function computeStudyFocus(upload: UploadRecord) {
   const wrongChapters = upload.parsedChapters
-    .map((chapter) => {
-      const stats = computeChapterScore(chapter, upload.userAnswers);
-      return {
-        chapter,
-        stats,
-      };
-    })
+    .map((chapter) => ({ chapter, stats: computeChapterScore(chapter, upload.userAnswers) }))
     .filter((item) => item.stats.wrong > 0)
     .sort((left, right) => right.stats.wrong - left.stats.wrong || left.stats.accuracy - right.stats.accuracy);
 
   const primary = wrongChapters[0];
-  const focusTopics = wrongChapters.flatMap((item) => item.chapter.revisionFocus).filter(Boolean);
-  const uniqueFocusTopics = Array.from(new Set(focusTopics)).slice(0, 5);
+  const focusTopics = Array.from(new Set(wrongChapters.flatMap((item) => item.chapter.revisionFocus))).slice(0, 5);
 
   return {
     weakestChapter: primary?.chapter.readingTitle || "Answer more questions to unlock this",
     notesSummary: primary?.chapter.notesSummary || "Once you answer more questions, the app will turn your weak areas into a sharper revision brief.",
-    focusTopics: uniqueFocusTopics,
+    focusTopics,
   };
 }
 
@@ -95,14 +85,28 @@ export function PracticeScreen({
   syncingSubject: Subject | null;
   answerPracticeQuestion: (subject: Subject, questionId: string, selectedOption: string) => void;
   resetPracticeAnswers: (subject: Subject) => void;
-  askPracticeAssistant: (subject: Subject, question: string, extraContext?: Record<string, unknown>) => Promise<string>;
+  askPracticeAssistant: (subject: Subject, question: string, extraContext?: Record<string, unknown>) => Promise<{ answer: string; imageUrl: string }>;
 }) {
   const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const [expandedChapters, setExpandedChapters] = useState<Record<string, boolean>>({});
+  const [showBackendConfig, setShowBackendConfig] = useState(false);
   const [assistantSubject, setAssistantSubject] = useState<Subject | null>(null);
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantImageUrl, setAssistantImageUrl] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
+
+  const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
+  const subjectSummaries = useMemo(
+    () => Object.fromEntries(uploads.map((upload) => [upload.subject, computeOverallSummary(upload)])),
+    [uploads],
+  );
+
+  useEffect(() => {
+    if (!assistantSubject && parsedSubjects[0]) {
+      setAssistantSubject(parsedSubjects[0].subject);
+    }
+  }, [assistantSubject, parsedSubjects]);
 
   async function handlePick(subject: Subject, type: "notesPdfName" | "questionBankPdfName") {
     try {
@@ -116,39 +120,19 @@ export function PracticeScreen({
     try {
       await syncSubjectWithAi(subject);
       setExpandedSubjects((current) => ({ ...current, [subject]: true }));
-      Alert.alert("AI sync complete", `The ${subject} PDFs were sent to your backend and the app turned the response into chapter questions.`);
+      Alert.alert("AI sync complete", `The ${subject} PDFs were sent to your backend and the app refreshed the chapter questions.`);
     } catch (error) {
       Alert.alert("AI sync failed", error instanceof Error ? error.message : "The backend sync did not complete.");
     }
   }
 
-  const readySubjects = uploads.filter((upload) => upload.readyForReview);
-  const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
-  const overallReadyText = parsedSubjects.length ? parsedSubjects.map((item) => item.subject).join(", ") : "none yet";
-
-  useEffect(() => {
-    if (!assistantSubject && parsedSubjects[0]) {
-      setAssistantSubject(parsedSubjects[0].subject);
-    }
-  }, [assistantSubject, parsedSubjects]);
-
-  const subjectSummaries = useMemo(
-    () =>
-      Object.fromEntries(
-        uploads.map((upload) => [
-          upload.subject,
-          computeOverallSummary(upload),
-        ]),
-      ),
-    [uploads],
-  );
-
   async function handleAssistantQuestion() {
     if (!assistantSubject || !assistantQuestion.trim()) return;
     try {
       setAssistantLoading(true);
-      const answer = await askPracticeAssistant(assistantSubject, assistantQuestion.trim());
-      setAssistantAnswer(answer);
+      const result = await askPracticeAssistant(assistantSubject, assistantQuestion.trim());
+      setAssistantAnswer(result.answer);
+      setAssistantImageUrl(result.imageUrl);
     } catch (error) {
       Alert.alert("Study assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
     } finally {
@@ -157,54 +141,45 @@ export function PracticeScreen({
   }
 
   return (
-    <>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <Panel title="Practice" icon="library-outline">
         <Text style={styles.copy}>
-          Upload notes and question-bank PDFs, let AI split them chapter-wise, answer inside the app, and use the summary to see which areas still need another pass.
+          One clean flow: upload a subject, sync with AI, answer chapter questions, see what went wrong, then ask the assistant what to study next.
         </Text>
       </Panel>
 
-      <Panel title="Connect backend" icon="cloud-outline">
-        <Text style={styles.copy}>
-          Add your backend URL here. The phone app sends PDFs there, and the backend talks to OpenAI securely with your API key.
-        </Text>
-        <TextInput
-          value={backendBaseUrl}
-          onChangeText={setBackendBaseUrl}
-          style={uiStyles.input}
-          placeholder="https://your-backend.onrender.com"
-          placeholderTextColor={colors.inkSoft}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Text style={styles.helperText}>If you use Render, paste the `https://...onrender.com` link here.</Text>
-      </Panel>
-
-      <Panel title="Upload materials" icon="document-attach-outline">
+      <Panel title="Question bank" icon="albums-outline">
         {uploads.length ? (
           uploads.map((upload) => {
-            const summary = subjectSummaries[upload.subject];
             const expanded = Boolean(expandedSubjects[upload.subject]);
+            const summary = subjectSummaries[upload.subject];
             const studyFocus = computeStudyFocus(upload);
 
             return (
-              <View key={upload.subject} style={styles.uploadCard}>
-                <Pressable style={styles.uploadHeader} onPress={() => setExpandedSubjects((current) => ({ ...current, [upload.subject]: !expanded }))}>
+              <View key={upload.subject} style={styles.subjectCard}>
+                <Pressable style={styles.subjectHeader} onPress={() => setExpandedSubjects((current) => ({ ...current, [upload.subject]: !expanded }))}>
                   <View style={styles.flex}>
-                    <Text style={styles.uploadTitle}>{upload.subject}</Text>
-                    <Text style={styles.uploadMeta}>
-                      {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters parsed` : `Detected chapters: ${upload.chaptersDetected}`}
+                    <Text style={styles.subjectTitle}>{upload.subject}</Text>
+                    <Text style={styles.subjectMeta}>
+                      {upload.parsedChapters.length
+                        ? `${upload.parsedChapters.length} chapters parsed · ${summary.totalAnswered}/${summary.totalQuestions} answered`
+                        : "Upload notes + question bank, then sync with AI"}
                     </Text>
                   </View>
-                  <View style={styles.uploadBadgeStack}>
-                    <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
-                    {upload.parsedChapters.length ? <Badge text={`${summary.totalAnswered}/${summary.totalQuestions} answered`} tone="accent" /> : null}
-                  </View>
+                  <Badge
+                    text={upload.uploadStatus}
+                    tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"}
+                  />
                 </Pressable>
 
-                <View style={styles.buttonRow}>
-                  <ActionButton label={upload.notesPdfName || "Add notes PDF"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
-                  <ActionButton label={upload.questionBankPdfName || "Add Q-bank PDF"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
+                <View style={styles.actionRow}>
+                  <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
+                  <ActionButton
+                    label={upload.questionBankPdfName || "Add question bank"}
+                    icon="albums-outline"
+                    onPress={() => handlePick(upload.subject, "questionBankPdfName")}
+                    compact
+                  />
                   {upload.readyForReview ? (
                     <ActionButton
                       label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"}
@@ -218,35 +193,35 @@ export function PracticeScreen({
                 {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
 
                 {expanded ? (
-                  <>
-                    <Text style={styles.uploadMeta}>Notes: {upload.notesPdfName ? "uploaded" : "pending"}</Text>
-                    <Text style={styles.uploadMeta}>Question bank: {upload.questionBankPdfName ? "uploaded" : "pending"}</Text>
-                    {upload.lastSyncAt ? <Text style={styles.uploadMeta}>Last AI sync: {upload.lastSyncAt}</Text> : null}
-
+                  <View style={styles.subjectDetail}>
                     {upload.parsedChapters.length ? (
-                      <View style={styles.summaryPanel}>
-                        <Text style={styles.statusTitle}>Practice summary</Text>
-                        <View style={styles.summaryRow}>
-                          <Badge text={`Answered ${summary.totalAnswered}/${summary.totalQuestions}`} tone="accent" />
-                          <Badge text={`Correct ${summary.totalCorrect}`} tone="success" />
-                          <Badge text={`Wrong ${summary.totalWrong}`} tone="danger" />
-                          <Badge text={`Accuracy ${summary.accuracy}%`} tone="warning" />
+                      <>
+                        <View style={styles.summaryCard}>
+                          <Text style={styles.cardTitle}>Practice summary</Text>
+                          <View style={styles.badgeWrap}>
+                            <Badge text={`Answered ${summary.totalAnswered}/${summary.totalQuestions}`} tone="accent" />
+                            <Badge text={`Correct ${summary.totalCorrect}`} tone="success" />
+                            <Badge text={`Wrong ${summary.totalWrong}`} tone="danger" />
+                            <Badge text={`Accuracy ${summary.accuracy}%`} tone="warning" />
+                          </View>
+                          <Text style={styles.metaLine}>Weakest area: {summary.weakestArea}</Text>
                         </View>
-                        <Text style={styles.statusLine}>Weakest area right now: {summary.weakestArea}</Text>
-                        <View style={styles.buttonRow}>
-                          <ActionButton label="Reset answers" icon="refresh-outline" onPress={() => resetPracticeAnswers(upload.subject)} compact />
-                        </View>
-                        <View style={styles.studyFocusCard}>
-                          <Text style={styles.statusTitle}>What to study next</Text>
-                          <Text style={styles.statusLine}>Weakest chapter: {studyFocus.weakestChapter}</Text>
-                          <Text style={styles.statusLine}>{studyFocus.notesSummary}</Text>
+
+                        <View style={styles.summaryCard}>
+                          <Text style={styles.cardTitle}>What to study next</Text>
+                          <Text style={styles.metaLine}>Weakest chapter: {studyFocus.weakestChapter}</Text>
+                          <Text style={styles.metaLine}>{studyFocus.notesSummary}</Text>
                           {studyFocus.focusTopics.length ? (
-                            <View style={styles.summaryRow}>
+                            <View style={styles.badgeWrap}>
                               {studyFocus.focusTopics.map((topic) => (
                                 <Badge key={topic} text={topic} tone="accent" />
                               ))}
                             </View>
                           ) : null}
+                        </View>
+
+                        <View style={styles.actionRow}>
+                          <ActionButton label="Reset answers" icon="refresh-outline" onPress={() => resetPracticeAnswers(upload.subject)} compact />
                         </View>
 
                         {upload.parsedChapters.map((chapter) => {
@@ -274,85 +249,87 @@ export function PracticeScreen({
                               </Pressable>
 
                               {chapterExpanded ? (
-                                <>
+                                <View style={styles.chapterDetail}>
                                   {chapter.notesSummary ? <Text style={styles.chapterSummary}>{chapter.notesSummary}</Text> : null}
                                   {chapter.revisionFocus.length ? (
-                                    <View style={styles.summaryRow}>
-                                      {chapter.revisionFocus.map((item) => (
-                                        <Badge key={item} text={item} tone="warning" />
+                                    <View style={styles.badgeWrap}>
+                                      {chapter.revisionFocus.map((topic) => (
+                                        <Badge key={topic} text={topic} tone="warning" />
                                       ))}
                                     </View>
                                   ) : null}
-                                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                    <View style={styles.questionStack}>
-                                    {chapter.questions.map((question, index) => {
-                                      const selected = upload.userAnswers[question.id];
-                                      const isCorrect =
-                                        selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
 
-                                      return (
-                                        <View key={question.id} style={styles.questionCard}>
-                                          <Text style={styles.questionTitle}>
-                                            Q{index + 1}. {question.question}
-                                          </Text>
-                                          <View style={styles.optionWrap}>
-                                            {question.options.length ? (
-                                              question.options.map((option) => {
-                                                const chosen = selected === option;
-                                                const revealCorrect = Boolean(selected && question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
-                                                return (
-                                                  <Pressable
-                                                    key={option}
+                                  {chapter.questions.map((question, index) => {
+                                    const selected = upload.userAnswers[question.id];
+                                    const isCorrect =
+                                      selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
+
+                                    return (
+                                      <View key={question.id} style={styles.questionCard}>
+                                        <Text style={styles.questionTitle}>
+                                          Q{index + 1}. {question.question}
+                                        </Text>
+
+                                        <View style={styles.optionWrap}>
+                                          {question.options.length ? (
+                                            question.options.map((option) => {
+                                              const chosen = selected === option;
+                                              const revealCorrect =
+                                                Boolean(selected && question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
+
+                                              return (
+                                                <Pressable
+                                                  key={option}
+                                                  style={[
+                                                    styles.optionButton,
+                                                    chosen && styles.optionButtonSelected,
+                                                    revealCorrect && styles.optionButtonCorrect,
+                                                  ]}
+                                                  onPress={() => answerPracticeQuestion(upload.subject, question.id, option)}
+                                                >
+                                                  <Text
                                                     style={[
-                                                      styles.optionButton,
-                                                      chosen && styles.optionButtonSelected,
-                                                      revealCorrect && styles.optionButtonCorrect,
+                                                      styles.optionText,
+                                                      chosen && styles.optionTextSelected,
+                                                      revealCorrect && styles.optionTextCorrect,
                                                     ]}
-                                                    onPress={() => answerPracticeQuestion(upload.subject, question.id, option)}
                                                   >
-                                                    <Text
-                                                      style={[
-                                                        styles.optionText,
-                                                        chosen && styles.optionTextSelected,
-                                                        revealCorrect && styles.optionTextCorrect,
-                                                      ]}
-                                                    >
-                                                      {option}
-                                                    </Text>
-                                                  </Pressable>
-                                                );
-                                              })
-                                            ) : (
-                                              <Text style={styles.helperText}>No options were extracted for this question yet.</Text>
-                                            )}
-                                          </View>
-
-                                          {selected ? (
-                                            <View style={styles.feedbackCard}>
-                                              <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
-                                              {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
-                                              {question.explanation ? <Text style={styles.feedbackLine}>{question.explanation}</Text> : null}
-                                              {question.tags.length ? <Text style={styles.feedbackLine}>Tags: {question.tags.join(", ")}</Text> : null}
-                                            </View>
-                                          ) : null}
+                                                    {option}
+                                                  </Text>
+                                                </Pressable>
+                                              );
+                                            })
+                                          ) : (
+                                            <Text style={styles.helperText}>No options were extracted for this question yet.</Text>
+                                          )}
                                         </View>
-                                      );
-                                    })}
-                                    </View>
-                                  </ScrollView>
-                                </>
+
+                                        {selected ? (
+                                          <View style={styles.feedbackCard}>
+                                            <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
+                                            {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
+                                            {question.explanation ? <Text style={styles.feedbackLine}>{question.explanation}</Text> : null}
+                                            {question.tags.length ? <Text style={styles.feedbackLine}>Tags: {question.tags.join(", ")}</Text> : null}
+                                          </View>
+                                        ) : null}
+                                      </View>
+                                    );
+                                  })}
+                                </View>
                               ) : null}
                             </View>
                           );
                         })}
-                      </View>
+                      </>
                     ) : upload.aiSummary ? (
-                      <View style={styles.aiSummaryCard}>
-                        <Text style={styles.statusTitle}>Latest AI output</Text>
-                        <Text style={styles.aiSummaryText}>{upload.aiSummary}</Text>
+                      <View style={styles.summaryCard}>
+                        <Text style={styles.cardTitle}>Latest AI output</Text>
+                        <Text style={styles.metaLine}>{upload.aiSummary}</Text>
                       </View>
-                    ) : null}
-                  </>
+                    ) : (
+                      <EmptyState text="No parsed chapters yet. Upload files and sync with AI." />
+                    )}
+                  </View>
                 ) : null}
               </View>
             );
@@ -362,30 +339,13 @@ export function PracticeScreen({
         )}
       </Panel>
 
-      <Panel title="What AI is doing here" icon="sparkles-outline">
-        <View style={styles.modeCard}>
-          <Text style={styles.modeTitle}>Current flow</Text>
-          <Text style={styles.modeMeta}>1. Upload notes and question bank.</Text>
-          <Text style={styles.modeMeta}>2. AI groups questions chapter-wise.</Text>
-          <Text style={styles.modeMeta}>3. You answer inside the app and get a score summary.</Text>
-          <Text style={styles.modeMeta}>4. The weakest chapter becomes clear from your results.</Text>
-        </View>
-        <Text style={styles.copy}>Subjects parsed so far: {overallReadyText}.</Text>
-      </Panel>
-
-      <Panel title="What comes next" icon="construct-outline">
-        <Text style={styles.copy}>
-          The next upgrade can generate new reinforcement questions from the chapters you get wrong most often, so the app becomes more like a personal tutor instead of only a tracker.
-        </Text>
-      </Panel>
-
       <Panel title="Study assistant" icon="chatbubble-ellipses-outline">
         <Text style={styles.copy}>
-          Ask about your notes, wrong answers, chapter traps, or exam tips. The assistant uses the material you already uploaded for that subject.
+          Ask about notes, formulas, mistakes, exam tips, or say you want a visual explanation. The assistant uses your uploaded material for that subject.
         </Text>
         {parsedSubjects.length ? (
           <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
               {parsedSubjects.map((upload) => (
                 <Pressable
                   key={upload.subject}
@@ -400,22 +360,18 @@ export function PracticeScreen({
               value={assistantQuestion}
               onChangeText={setAssistantQuestion}
               style={[uiStyles.input, styles.chatInput]}
-              placeholder="Ask: what topics should I revise in Rate and Return?"
+              placeholder="Ask: explain rate and return simply, show the key formula, and give me a quick visual."
               placeholderTextColor={colors.inkSoft}
               multiline
             />
-            <View style={styles.buttonRow}>
-              <ActionButton
-                label={assistantLoading ? "Thinking..." : "Ask assistant"}
-                icon="sparkles-outline"
-                onPress={() => void handleAssistantQuestion()}
-                compact
-              />
+            <View style={styles.actionRow}>
+              <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAssistantQuestion()} compact />
             </View>
             {assistantAnswer ? (
-              <View style={styles.aiSummaryCard}>
-                <Text style={styles.statusTitle}>Assistant answer</Text>
-                <Text style={styles.aiSummaryText}>{assistantAnswer}</Text>
+              <View style={styles.summaryCard}>
+                <Text style={styles.cardTitle}>Assistant answer</Text>
+                <Text style={styles.assistantText}>{assistantAnswer}</Text>
+                {assistantImageUrl ? <Image source={{ uri: assistantImageUrl }} style={styles.assistantImage} resizeMode="contain" /> : null}
               </View>
             ) : null}
           </>
@@ -423,7 +379,29 @@ export function PracticeScreen({
           <EmptyState text="Sync a subject with AI first, then you can ask the assistant about it." />
         )}
       </Panel>
-    </>
+
+      <Panel title="Advanced" icon="settings-outline">
+        <Pressable style={styles.advancedHeader} onPress={() => setShowBackendConfig((current) => !current)}>
+          <Text style={styles.cardTitle}>Backend connection</Text>
+          <Badge text={showBackendConfig ? "Hide" : "Show"} tone="accent" />
+        </Pressable>
+        {showBackendConfig ? (
+          <View style={styles.summaryCard}>
+            <Text style={styles.metaLine}>Keep this collapsed so the backend URL does not get changed by accident.</Text>
+            <TextInput
+              value={backendBaseUrl}
+              onChangeText={setBackendBaseUrl}
+              style={uiStyles.input}
+              placeholder="https://your-backend.onrender.com"
+              placeholderTextColor={colors.inkSoft}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.helperText}>Use your Render URL here. Local computer IPs are only for temporary testing.</Text>
+          </View>
+        ) : null}
+      </Panel>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -432,7 +410,7 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     lineHeight: 20,
   },
-  uploadCard: {
+  subjectCard: {
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
@@ -440,41 +418,30 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
-  uploadHeader: {
+  subjectHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
     alignItems: "center",
+    gap: 10,
   },
-  uploadBadgeStack: {
-    gap: 6,
-    alignItems: "flex-end",
-  },
-  uploadTitle: {
+  subjectTitle: {
     color: colors.ink,
     fontWeight: "800",
+    fontSize: 16,
   },
-  uploadMeta: {
+  subjectMeta: {
     color: colors.inkSoft,
     fontSize: 12,
-    marginTop: 2,
+    marginTop: 4,
   },
-  buttonRow: {
+  actionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
   },
-  helperText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    lineHeight: 18,
+  subjectDetail: {
+    gap: 12,
   },
-  errorText: {
-    color: colors.danger,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  summaryPanel: {
+  summaryCard: {
     backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
@@ -482,30 +449,22 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
-  studyFocusCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 12,
-    gap: 8,
-  },
-  statusTitle: {
+  cardTitle: {
     color: colors.ink,
     fontWeight: "800",
   },
-  statusLine: {
+  metaLine: {
     color: colors.inkSoft,
     lineHeight: 19,
   },
-  summaryRow: {
+  badgeWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
   chapterCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 12,
@@ -526,22 +485,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  chapterDetail: {
+    gap: 12,
+  },
   chapterSummary: {
     color: colors.inkSoft,
     lineHeight: 19,
   },
-  questionStack: {
-    gap: 12,
-  },
   questionCard: {
-    width: 300,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 14,
     padding: 12,
     gap: 10,
-    marginRight: 10,
   },
   questionTitle: {
     color: colors.ink,
@@ -554,7 +511,7 @@ const styles = StyleSheet.create({
   optionButton: {
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -580,7 +537,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   feedbackCard: {
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
@@ -595,32 +552,14 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     lineHeight: 18,
   },
-  modeCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 18,
-    padding: 14,
-    gap: 6,
-  },
-  modeTitle: {
-    color: colors.ink,
-    fontWeight: "800",
-  },
-  modeMeta: {
+  helperText: {
     color: colors.inkSoft,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 18,
   },
-  aiSummaryCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 12,
-    gap: 6,
-  },
-  aiSummaryText: {
-    color: colors.inkSoft,
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
     lineHeight: 18,
   },
   subjectChipRow: {
@@ -646,8 +585,23 @@ const styles = StyleSheet.create({
     color: colors.surface,
   },
   chatInput: {
-    minHeight: 90,
+    minHeight: 110,
     textAlignVertical: "top",
+  },
+  assistantText: {
+    color: colors.ink,
+    lineHeight: 21,
+  },
+  assistantImage: {
+    width: "100%",
+    height: 220,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMuted,
+  },
+  advancedHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   flex: {
     flex: 1,
