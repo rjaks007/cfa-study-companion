@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { MetricCard, MiniStat } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
@@ -19,7 +20,7 @@ export default function App() {
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
   const study = useStudyCompanion();
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
 
@@ -71,10 +72,10 @@ export default function App() {
     setActiveTab("practice");
   }
 
-  function focusBottomField(targetY = 0) {
+  function focusBottomField() {
     setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 140), animated: true });
-    }, 150);
+      scrollRef.current?.scrollToEnd?.(true);
+    }, 120);
   }
 
   const panResponder = useMemo(
@@ -110,10 +111,15 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.flex} {...panResponder.panHandlers}>
-          <ScrollView
-            ref={scrollRef}
+          <KeyboardAwareScrollView
+            innerRef={(ref) => {
+              scrollRef.current = ref;
+            }}
             style={styles.screen}
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
+            enableOnAndroid
+            extraScrollHeight={140}
+            extraHeight={140}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
@@ -226,7 +232,7 @@ export default function App() {
                 onConsumeTarget={clearPracticeTarget}
               />
             ) : null}
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           {!keyboardVisible ? (
             <View style={styles.bottomTabBar}>
