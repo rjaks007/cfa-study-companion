@@ -39,7 +39,7 @@ export function OverviewScreen({
 
   return (
     <>
-      <View style={styles.planEndCard}>
+      <View style={styles.planEndRow}>
         <Text style={styles.planEndLabel}>Plan ends</Text>
         <Text style={styles.planEndValue}>{formatLongDate(planEndDate)}</Text>
       </View>
@@ -139,14 +139,17 @@ export function OverviewScreen({
 }
 
 const styles = StyleSheet.create({
-  planEndCard: {
+  planEndRow: {
     backgroundColor: colors.surface,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    gap: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   planEndLabel: {
     color: colors.inkSoft,
@@ -157,7 +160,7 @@ const styles = StyleSheet.create({
   },
   planEndValue: {
     color: colors.ink,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "800",
   },
   summaryCard: {
