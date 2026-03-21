@@ -80,6 +80,20 @@ export default function App() {
     setActiveTab("practice");
   }
 
+  function scrollPracticeBottomIntoView() {
+    const ref = scrollRef.current;
+    setTimeout(() => {
+      if (!ref) return;
+      if (typeof ref.scrollToEnd === "function") {
+        ref.scrollToEnd(true);
+      } else if (typeof ref.scrollToPosition === "function") {
+        ref.scrollToPosition(0, 100000, true);
+      } else if (typeof ref.scrollTo === "function") {
+        ref.scrollTo({ x: 0, y: 100000, animated: true });
+      }
+    }, Platform.OS === "android" ? 120 : 80);
+  }
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -243,6 +257,7 @@ export default function App() {
                   savePracticeQuestion={study.savePracticeQuestion}
                   deleteSavedQuestion={study.deleteSavedQuestion}
                   analyzeGeneratedPractice={study.analyzeGeneratedPractice}
+                  onRequestFocusBottomField={scrollPracticeBottomIntoView}
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}
                   onConsumeTarget={clearPracticeTarget}

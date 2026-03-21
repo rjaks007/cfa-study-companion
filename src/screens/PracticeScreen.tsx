@@ -52,6 +52,7 @@ export function PracticeScreen({
   savePracticeQuestion,
   deleteSavedQuestion,
   analyzeGeneratedPractice,
+  onRequestFocusBottomField,
   targetSubject,
   targetChapterTitle,
   onConsumeTarget,
@@ -78,6 +79,7 @@ export function PracticeScreen({
   savePracticeQuestion: (subject: Subject, question: PracticeQuestion, options?: { reason?: "bookmark" | "wrong-answer"; chapterTitle?: string; difficulty?: PracticeDifficulty }) => void;
   deleteSavedQuestion: (subject: Subject, questionId: string, bucket: "savedQuestions" | "wrongQuestions") => void;
   analyzeGeneratedPractice: (subject: Subject) => Promise<unknown>;
+  onRequestFocusBottomField?: () => void;
   targetSubject?: Subject;
   targetChapterTitle?: string;
   onConsumeTarget?: () => void;
@@ -547,6 +549,7 @@ export function PracticeScreen({
                 <TextInput
                   value={backendBaseUrl}
                   onChangeText={setBackendBaseUrl}
+                  onFocus={onRequestFocusBottomField}
                   style={uiStyles.input}
                   placeholder="https://your-backend.onrender.com"
                   placeholderTextColor={colors.inkSoft}
