@@ -120,8 +120,10 @@ export default function App() {
             style={styles.screen}
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
-            extraScrollHeight={140}
-            extraHeight={140}
+            enableAutomaticScroll
+            extraScrollHeight={Platform.OS === "android" ? 220 : 140}
+            extraHeight={Platform.OS === "android" ? 220 : 140}
+            keyboardOpeningTime={0}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
