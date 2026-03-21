@@ -309,6 +309,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: 16,
+    marginTop: Platform.OS === "android" ? 6 : 0,
     gap: 6,
   },
   sectionIntroHeader: {

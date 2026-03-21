@@ -151,8 +151,6 @@ app.post("/api/study-chat", async (req, res) => {
       return res.status(400).json({ error: "question is required." });
     }
 
-    const wantsVisual = /diagram|visual|image|draw|chart|timeline|map/i.test(String(question));
-
     const response = await client.responses.create({
       model: "gpt-5.4-mini",
       input: [
@@ -192,31 +190,10 @@ app.post("/api/study-chat", async (req, res) => {
       ],
     });
 
-    let imageUrl = "";
-    if (wantsVisual) {
-      try {
-        const image = await client.images.generate({
-          model: "gpt-image-1",
-          size: "1024x1024",
-          prompt:
-            `Create a clean educational study visual for CFA Level I ${subject}. ` +
-            `Focus on this request: ${question}. ` +
-            "Use a simple academic style with labels and a plain background.",
-        });
-
-        const b64 = image.data?.[0]?.b64_json;
-        if (b64) {
-          imageUrl = `data:image/png;base64,${b64}`;
-        }
-      } catch (imageError) {
-        console.warn("Image generation skipped", imageError);
-      }
-    }
-
     res.json({
       ok: true,
       answer: response.output_text,
-      imageUrl,
+      imageUrl: "",
     });
   } catch (error) {
     console.error(error);
@@ -255,7 +232,7 @@ app.post("/api/generate-practice-set", async (req, res) => {
     }
 
     const response = await client.responses.create({
-      model: "gpt-5.4",
+      model: "gpt-5.4-mini",
       input: [
         {
           role: "system",
