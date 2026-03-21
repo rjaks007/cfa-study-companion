@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
@@ -40,7 +41,12 @@ export function OverviewScreen({
   return (
     <>
       <View style={styles.planEndCard}>
-        <Text style={styles.planEndLabel}>Plan ends</Text>
+        <View style={styles.planEndHeader}>
+          <View style={styles.planEndIconWrap}>
+            <Ionicons name="calendar-clear-outline" size={15} color={colors.primary} />
+          </View>
+          <Text style={styles.planEndLabel}>Plan ends</Text>
+        </View>
         <Text style={styles.planEndValue}>{formatLongDate(planEndDate)}</Text>
       </View>
 
@@ -147,6 +153,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 4,
+  },
+  planEndHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  planEndIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primarySoft,
   },
   planEndLabel: {
     color: colors.inkSoft,

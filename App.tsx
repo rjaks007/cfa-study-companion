@@ -85,13 +85,13 @@ export default function App() {
     const scrollNearBottom = () => {
       if (!ref) return;
       if (typeof ref.scrollToPosition === "function") {
-        ref.scrollToPosition(0, 760, true);
+        ref.scrollToPosition(0, 560, true);
       } else if (typeof ref.scrollTo === "function") {
-        ref.scrollTo({ x: 0, y: 760, animated: true });
+        ref.scrollTo({ x: 0, y: 560, animated: true });
       }
     };
     setTimeout(scrollNearBottom, Platform.OS === "android" ? 120 : 80);
-    setTimeout(scrollNearBottom, Platform.OS === "android" ? 320 : 180);
+    setTimeout(scrollNearBottom, Platform.OS === "android" ? 240 : 150);
   }
 
   const panResponder = useMemo(
@@ -135,8 +135,8 @@ export default function App() {
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             enableAutomaticScroll
-            extraScrollHeight={Platform.OS === "android" ? 380 : 180}
-            extraHeight={Platform.OS === "android" ? 380 : 180}
+            extraScrollHeight={Platform.OS === "android" ? 250 : 160}
+            extraHeight={Platform.OS === "android" ? 220 : 160}
             keyboardOpeningTime={0}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
