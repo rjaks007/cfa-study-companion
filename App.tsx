@@ -145,6 +145,9 @@ export default function App() {
           >
             {activeTab === "overview" ? (
               <View style={styles.hero}>
+                <View style={styles.testBanner}>
+                  <Text style={styles.testBannerText}>TEST BUILD 21 MAR</Text>
+                </View>
                 <View style={styles.heroBadge}>
                   <Ionicons name="school-outline" size={15} color={colors.primary} />
                   <Text style={styles.heroBadgeText}>CFA Study Companion</Text>
@@ -350,6 +353,19 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 12,
     fontWeight: "700",
+  },
+  testBanner: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.danger,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  testBannerText: {
+    color: colors.surface,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   heroTitle: {
     fontSize: 28,
