@@ -1,8 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
-import { formatLongDate, formatShortDate } from "../utils/study";
+import { formatInputDate, formatLongDate, formatShortDate } from "../utils/study";
 
 type ReadingItem = {
   id: string;
@@ -24,6 +25,12 @@ export function OverviewScreen({
   onEnableNotifications,
   onOpenWeekly,
   onOpenPracticeReading,
+  setupExpanded,
+  onToggleSetup,
+  studySetupDate,
+  onChangeStudySetupDate,
+  onCommitStudySetupDate,
+  studyStartDate,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTomorrowReadings: ReadingItem[];
@@ -34,6 +41,12 @@ export function OverviewScreen({
   onEnableNotifications: () => Promise<boolean>;
   onOpenWeekly: () => void;
   onOpenPracticeReading: (reading: ReadingItem) => void;
+  setupExpanded: boolean;
+  onToggleSetup: () => void;
+  studySetupDate: string;
+  onChangeStudySetupDate: (value: string) => void;
+  onCommitStudySetupDate: () => void;
+  studyStartDate: string;
 }) {
   const nextPriority = overdueReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
 
@@ -134,6 +147,24 @@ export function OverviewScreen({
           <EmptyState text="No overdue reviews right now." />
         )}
       </Panel>
+
+      <Pressable style={styles.setupCard} onPress={onToggleSetup}>
+        <View style={styles.setupHeader}>
+          <Text style={styles.setupTitle}>Study setup</Text>
+          <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
+        </View>
+        <Text style={styles.setupMeta}>Plan starts on {formatInputDate(studyStartDate)}</Text>
+        {setupExpanded ? (
+          <TextInput
+            value={studySetupDate}
+            onChangeText={onChangeStudySetupDate}
+            onBlur={onCommitStudySetupDate}
+            style={styles.input}
+            placeholder="DD/MM/YYYY"
+            placeholderTextColor={colors.inkSoft}
+          />
+        ) : null}
+      </Pressable>
     </>
   );
 }
@@ -243,5 +274,38 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  setupCard: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 22,
+    padding: 14,
+    gap: 12,
+  },
+  setupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  setupTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.inkSoft,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  setupMeta: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  input: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: colors.ink,
+    fontSize: 14,
   },
 });

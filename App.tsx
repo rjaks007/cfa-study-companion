@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { MetricCard } from "./src/components/ui";
 import { TABS } from "./src/constants";
@@ -176,34 +176,21 @@ export default function App() {
                   setActiveTab("weekly");
                 }}
                 onOpenPracticeReading={openPracticeFromOverview}
+                setupExpanded={setupExpanded}
+                onToggleSetup={() => setSetupExpanded((current) => !current)}
+                studySetupDate={studySetupDate}
+                onChangeStudySetupDate={setStudySetupDate}
+                onCommitStudySetupDate={() => {
+                  const parsed = parseInputDate(studySetupDate);
+                  if (parsed) {
+                    study.setStartDate(parsed);
+                    setStudySetupDate(formatInputDate(parsed));
+                  } else {
+                    setStudySetupDate(formatInputDate(study.studyState.startDate));
+                  }
+                }}
+                studyStartDate={study.studyState.startDate}
               />
-            ) : null}
-            {activeTab === "overview" ? (
-              <Pressable style={styles.setupCard} onPress={() => setSetupExpanded((current) => !current)}>
-                <View style={styles.setupHeader}>
-                  <Text style={styles.sectionLabel}>Study setup</Text>
-                  <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
-                </View>
-                <Text style={styles.setupMeta}>Plan starts on {formatInputDate(study.studyState.startDate)}</Text>
-                {setupExpanded ? (
-                  <TextInput
-                    value={studySetupDate}
-                    onChangeText={setStudySetupDate}
-                    onBlur={() => {
-                      const parsed = parseInputDate(studySetupDate);
-                      if (parsed) {
-                        study.setStartDate(parsed);
-                        setStudySetupDate(formatInputDate(parsed));
-                      } else {
-                        setStudySetupDate(formatInputDate(study.studyState.startDate));
-                      }
-                    }}
-                    style={styles.input}
-                    placeholder="DD/MM/YYYY"
-                    placeholderTextColor={colors.inkSoft}
-                  />
-                ) : null}
-              </Pressable>
             ) : null}
 
             {activeTab === "weekly" ? (
@@ -380,38 +367,12 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 10,
   },
-  setupCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 22,
-    padding: 14,
-    gap: 12,
-  },
-  setupHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  setupMeta: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    lineHeight: 18,
-  },
   sectionLabel: {
     fontSize: 13,
     fontWeight: "800",
     color: colors.inkSoft,
     textTransform: "uppercase",
     letterSpacing: 0.3,
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: colors.ink,
-    fontSize: 14,
   },
   tabRow: {
     gap: 10,
