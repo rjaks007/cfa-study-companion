@@ -558,6 +558,7 @@ export function PracticeScreen({
                 />
               </View>
             ) : null}
+            {showAdvanced ? <View style={styles.advancedSpacer} /> : null}
           </Panel>
         </>
       ) : null}
@@ -885,6 +886,9 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 12,
     lineHeight: 18,
+  },
+  advancedSpacer: {
+    height: 180,
   },
   subjectChipRow: {
     gap: 10,

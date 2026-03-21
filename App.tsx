@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
-import { MetricCard, MiniStat } from "./src/components/ui";
+import { MetricCard } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
 import { OverviewScreen } from "./src/screens/OverviewScreen";
@@ -82,18 +82,16 @@ export default function App() {
 
   function scrollPracticeBottomIntoView() {
     const ref = scrollRef.current;
-    const scrollToBottom = () => {
+    const scrollNearBottom = () => {
       if (!ref) return;
-      if (typeof ref.scrollToEnd === "function") {
-        ref.scrollToEnd(true);
-      } else if (typeof ref.scrollToPosition === "function") {
-        ref.scrollToPosition(0, 100000, true);
+      if (typeof ref.scrollToPosition === "function") {
+        ref.scrollToPosition(0, 760, true);
       } else if (typeof ref.scrollTo === "function") {
-        ref.scrollTo({ x: 0, y: 100000, animated: true });
+        ref.scrollTo({ x: 0, y: 760, animated: true });
       }
     };
-    setTimeout(scrollToBottom, Platform.OS === "android" ? 120 : 80);
-    setTimeout(scrollToBottom, Platform.OS === "android" ? 320 : 180);
+    setTimeout(scrollNearBottom, Platform.OS === "android" ? 120 : 80);
+    setTimeout(scrollNearBottom, Platform.OS === "android" ? 320 : 180);
   }
 
   const panResponder = useMemo(
@@ -137,8 +135,8 @@ export default function App() {
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             enableAutomaticScroll
-            extraScrollHeight={Platform.OS === "android" ? 300 : 160}
-            extraHeight={Platform.OS === "android" ? 300 : 160}
+            extraScrollHeight={Platform.OS === "android" ? 380 : 180}
+            extraHeight={Platform.OS === "android" ? 380 : 180}
             keyboardOpeningTime={0}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
@@ -184,11 +182,7 @@ export default function App() {
                   <Text style={styles.sectionLabel}>Study setup</Text>
                   <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
                 </View>
-                <View style={styles.setupStatsRow}>
-                  <MiniStat label="Start date" value={formatInputDate(study.studyState.startDate)} />
-                  <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
-                  <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
-                </View>
+                <Text style={styles.setupMeta}>Plan starts on {formatInputDate(study.studyState.startDate)}</Text>
                 {setupExpanded ? (
                   <TextInput
                     value={studySetupDate}
@@ -395,6 +389,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  setupMeta: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   sectionLabel: {
     fontSize: 13,
     fontWeight: "800",
@@ -411,11 +410,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: colors.ink,
     fontSize: 14,
-  },
-  setupStatsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
   },
   tabRow: {
     gap: 10,
