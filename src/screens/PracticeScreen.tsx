@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   advancedSpacer: {
-    height: 84,
+    height: 28,
   },
   subjectChipRow: {
     gap: 10,

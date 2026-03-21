@@ -15,7 +15,7 @@ export function Panel({
   return (
     <View style={styles.panel}>
       <View style={styles.panelHeader}>
-        <Ionicons name={icon} size={18} color={colors.ink} />
+        <Ionicons name={icon} size={18} color={colors.primary} />
         <Text style={styles.panelTitle}>{title}</Text>
       </View>
       <View style={styles.panelBody}>{children}</View>
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   panelTitle: {
     fontSize: 20,
     fontWeight: "800",
-    color: colors.ink,
+    color: colors.primary,
   },
   panelBody: {
     padding: 18,
@@ -276,6 +276,8 @@ const styles = StyleSheet.create({
     minWidth: "47%",
     backgroundColor: colors.surfaceMuted,
     borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 14,
     gap: 8,
   },
@@ -301,7 +303,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
