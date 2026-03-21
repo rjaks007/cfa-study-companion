@@ -170,6 +170,55 @@ export function PracticeScreen({
     () => activeUpload?.wrongQuestions.filter((entry) => entry.chapterTitle === selectedChapter) || [],
     [activeUpload?.wrongQuestions, selectedChapter],
   );
+  const chapterCoverage = useMemo(() => {
+    if (!activeParsedChapter || !activeUpload) {
+      return { checklist: [] as string[], covered: [] as string[], missing: [] as string[] };
+    }
+
+    const checklist = Array.from(
+      new Set(
+        [
+          ...activeParsedChapter.losChecklist,
+          ...activeParsedChapter.revisionFocus,
+          ...activeParsedChapter.keySubtopics,
+          ...activeParsedChapter.formulas,
+          ...activeParsedChapter.sourceCoverageGaps,
+        ].map((item) => String(item).trim()).filter(Boolean),
+      ),
+    );
+
+    const chapterQuestions = [
+      ...(activeParsedChapter.questions || []),
+      ...(activeUpload.savedSets.filter((item) => item.chapterTitle === selectedChapter).flatMap((item) => item.questions || [])),
+      ...(activeUpload.savedQuestions.filter((item) => item.chapterTitle === selectedChapter).map((item) => item.question)),
+      ...(activeUpload.wrongQuestions.filter((item) => item.chapterTitle === selectedChapter).map((item) => item.question)),
+      ...(activeUpload.generatedSet?.chapterTitle === selectedChapter ? activeUpload.generatedSet.questions : []),
+    ];
+
+    const normalize = (value: string) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const covered = checklist.filter((topic) => {
+      const topicTokens = normalize(topic)
+        .split(" ")
+        .filter((token) => token.length > 2);
+      return chapterQuestions.some((question) => {
+        const haystack = normalize(`${question.question} ${(question.tags || []).join(" ")} ${question.explanation || ""}`);
+        const matches = topicTokens.filter((token) => haystack.includes(token));
+        return matches.length >= Math.max(1, Math.ceil(topicTokens.length * 0.5));
+      });
+    });
+
+    return {
+      checklist,
+      covered,
+      missing: checklist.filter((topic) => !covered.includes(topic)),
+    };
+  }, [activeParsedChapter, activeUpload, selectedChapter]);
 
   async function handlePick(subject: Subject, type: "notesPdfName" | "questionBankPdfName") {
     try {
@@ -343,6 +392,16 @@ export function PracticeScreen({
                       <View style={styles.summaryCard}>
                         <Text style={styles.cardTitle}>Chapter source</Text>
                         {activeParsedChapter.notesSummary ? <Text style={styles.metaText}>{activeParsedChapter.notesSummary}</Text> : null}
+                        {activeParsedChapter.losChecklist.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>LOS checklist</Text>
+                            <View style={styles.badgeWrap}>
+                              {activeParsedChapter.losChecklist.map((item) => (
+                                <Badge key={item} text={item} tone="primary" />
+                              ))}
+                            </View>
+                          </>
+                        ) : null}
                         {activeParsedChapter.keySubtopics.length ? (
                           <>
                             <Text style={styles.sectionLabel}>Must-cover topics</Text>
@@ -369,6 +428,37 @@ export function PracticeScreen({
                             <Text style={styles.metaText}>{activeParsedChapter.calculatorGuidance.join(" ")}</Text>
                           </>
                         ) : null}
+                        {activeParsedChapter.sourceCoverageGaps.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>Source may be missing</Text>
+                            <View style={styles.badgeWrap}>
+                              {activeParsedChapter.sourceCoverageGaps.map((item) => (
+                                <Badge key={item} text={item} tone="warning" />
+                              ))}
+                            </View>
+                          </>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    {chapterCoverage.checklist.length ? (
+                      <View style={styles.summaryCard}>
+                        <Text style={styles.cardTitle}>Coverage tracker</Text>
+                        <Text style={styles.metaText}>
+                          Covered {chapterCoverage.covered.length}/{chapterCoverage.checklist.length} tracked topics from your source and prior practice.
+                        </Text>
+                        {chapterCoverage.missing.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>Still undercovered</Text>
+                            <View style={styles.badgeWrap}>
+                              {chapterCoverage.missing.slice(0, 12).map((topic) => (
+                                <Badge key={topic} text={topic} tone="warning" />
+                              ))}
+                            </View>
+                          </>
+                        ) : (
+                          <Badge text="Coverage looks complete for tracked topics" tone="success" />
+                        )}
                       </View>
                     ) : null}
 

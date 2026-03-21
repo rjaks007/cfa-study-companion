@@ -78,6 +78,7 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
         id: `chapter-${chapterIndex + 1}`,
         readingTitle: readingTitle || `Chapter ${chapterIndex + 1}`,
         notesSummary: typeof chapter?.notesSummary === "string" ? chapter.notesSummary.trim() : "",
+        losChecklist: Array.isArray(chapter?.losChecklist) ? chapter.losChecklist.map((item: unknown) => String(item).trim()).filter(Boolean) : [],
         revisionFocus: Array.isArray(chapter?.revisionFocus)
           ? chapter.revisionFocus.map((item: unknown) => String(item).trim()).filter(Boolean)
           : [],
@@ -88,10 +89,102 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
         calculatorGuidance: Array.isArray(chapter?.calculatorGuidance)
           ? chapter.calculatorGuidance.map((item: unknown) => String(item).trim()).filter(Boolean)
           : [],
+        sourceCoverageGaps: Array.isArray(chapter?.sourceCoverageGaps)
+          ? chapter.sourceCoverageGaps.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : [],
         questions,
       };
     })
     .filter(Boolean) as PracticeChapter[];
+}
+
+function normalizeQuestionText(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeText(value: string) {
+  return normalizeQuestionText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2);
+}
+
+function questionFingerprint(question: Pick<PracticeQuestion, "question" | "options">) {
+  const optionText = Array.isArray(question.options) ? question.options.join(" ") : "";
+  return normalizeQuestionText(`${question.question} ${optionText}`);
+}
+
+function questionSimilarity(a: Pick<PracticeQuestion, "question" | "options">, b: Pick<PracticeQuestion, "question" | "options">) {
+  const aTokens = new Set(tokenizeText(`${a.question} ${(a.options || []).join(" ")}`));
+  const bTokens = new Set(tokenizeText(`${b.question} ${(b.options || []).join(" ")}`));
+  if (!aTokens.size || !bTokens.size) return 0;
+  let overlap = 0;
+  aTokens.forEach((token) => {
+    if (bTokens.has(token)) overlap += 1;
+  });
+  return overlap / Math.max(aTokens.size, bTokens.size);
+}
+
+function questionLooksDuplicate(question: PracticeQuestion, existingQuestions: PracticeQuestion[]) {
+  const fingerprint = questionFingerprint(question);
+  return existingQuestions.some((existing) => {
+    if (questionFingerprint(existing) === fingerprint) return true;
+    return questionSimilarity(question, existing) >= 0.82;
+  });
+}
+
+function topicCoveredByQuestion(topic: string, question: PracticeQuestion) {
+  const topicTokens = tokenizeText(topic);
+  if (!topicTokens.length) return false;
+  const questionText = normalizeQuestionText(`${question.question} ${(question.tags || []).join(" ")} ${question.explanation || ""}`);
+  const matched = topicTokens.filter((token) => questionText.includes(token));
+  return matched.length >= Math.max(1, Math.ceil(topicTokens.length * 0.5));
+}
+
+function collectExistingChapterQuestions(upload: UploadRecord, chapterTitle: string) {
+  const savedSetQuestions = upload.savedSets.filter((item) => item.chapterTitle === chapterTitle).flatMap((item) => item.questions || []);
+  const savedQuestionBank = upload.savedQuestions.filter((item) => item.chapterTitle === chapterTitle).map((item) => item.question);
+  const wrongQuestionBank = upload.wrongQuestions.filter((item) => item.chapterTitle === chapterTitle).map((item) => item.question);
+  const sourceQuestions = upload.parsedChapters.find((item) => item.readingTitle === chapterTitle)?.questions || [];
+  const liveQuestions = upload.generatedSet?.chapterTitle === chapterTitle ? upload.generatedSet.questions : [];
+  return [...savedSetQuestions, ...savedQuestionBank, ...wrongQuestionBank, ...sourceQuestions, ...liveQuestions];
+}
+
+function buildChapterCoverage(upload: UploadRecord, chapterTitle: string) {
+  const chapter = upload.parsedChapters.find((item) => item.readingTitle === chapterTitle);
+  if (!chapter) {
+    return {
+      checklist: [] as string[],
+      coveredTopics: [] as string[],
+      missingTopics: [] as string[],
+      existingQuestions: [] as PracticeQuestion[],
+    };
+  }
+
+  const checklist = Array.from(
+    new Set([
+      ...chapter.losChecklist,
+      ...chapter.revisionFocus,
+      ...chapter.keySubtopics,
+      ...chapter.formulas,
+      ...chapter.sourceCoverageGaps,
+    ].map((item) => String(item).trim()).filter(Boolean)),
+  );
+
+  const existingQuestions = collectExistingChapterQuestions(upload, chapterTitle);
+  const coveredTopics = checklist.filter((topic) => existingQuestions.some((question) => topicCoveredByQuestion(topic, question)));
+  const missingTopics = checklist.filter((topic) => !coveredTopics.includes(topic));
+
+  return {
+    checklist,
+    coveredTopics,
+    missingTopics,
+    existingQuestions,
+  };
 }
 
 function normalizePracticeHistory(value: unknown): PracticeHistoryEntry[] {
@@ -1059,6 +1152,8 @@ export function useStudyCompanion() {
       throw new Error("Sync this subject with AI first.");
     }
 
+    const coverage = buildChapterCoverage(upload, chapterTitle);
+
     const response = await fetch(`${backendBaseUrl}/api/generate-practice-set`, {
       method: "POST",
       headers: {
@@ -1075,6 +1170,9 @@ export function useStudyCompanion() {
         focusTopics: options?.focusTopics || [],
         baseQuestions: options?.baseQuestions || [],
         practiceHistory: upload.practiceHistory,
+        existingQuestions: coverage.existingQuestions.slice(0, 80),
+        missingTopics: coverage.missingTopics.slice(0, 24),
+        coverageChecklist: coverage.checklist.slice(0, 40),
       }),
     });
 
@@ -1088,13 +1186,28 @@ export function useStudyCompanion() {
       throw new Error("The practice set came back empty.");
     }
 
+    const uniqueQuestions = generatedSet.questions.filter((question, index, list) => {
+      const earlier = list.slice(0, index);
+      return !questionLooksDuplicate(question, [...coverage.existingQuestions, ...earlier]);
+    });
+
+    if (!uniqueQuestions.length) {
+      throw new Error("The generated set repeated topics you already have. Try again after another AI sync or choose a different chapter.");
+    }
+
+    const dedupedSet: GeneratedPracticeSet = {
+      ...generatedSet,
+      questions: uniqueQuestions,
+      questionCount: uniqueQuestions.length,
+    };
+
     setStudyState((current) => ({
       ...current,
       uploads: current.uploads.map((item) =>
         item.subject === subject
           ? {
               ...item,
-              generatedSet,
+              generatedSet: dedupedSet,
               generatedAnswers: {},
               generatedReview: null,
             }
@@ -1102,7 +1215,7 @@ export function useStudyCompanion() {
       ),
     }));
 
-    return generatedSet;
+    return dedupedSet;
   }
 
   function answerGeneratedQuestion(subject: Subject, questionId: string, selectedOption: string) {

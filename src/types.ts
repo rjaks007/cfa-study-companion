@@ -147,12 +147,14 @@ export interface PracticeChapter {
   id: string;
   readingTitle: string;
   notesSummary: string;
+  losChecklist: string[];
   revisionFocus: string[];
   keySubtopics: string[];
   formulas: string[];
   commonTraps: string[];
   questionPatterns: string[];
   calculatorGuidance: string[];
+  sourceCoverageGaps: string[];
   questions: PracticeQuestion[];
 }
 

@@ -102,10 +102,10 @@ app.post(
                   `You are helping organize CFA Level I practice materials for ${subject}. ` +
                   "You will receive extracted text samples from a notes PDF and a question-bank PDF. " +
                   "Build a reliable chapter map from the material. Do not try to extract every raw question. " +
-                  "Instead, identify likely chapters/readings, write a concise notes summary for each, list the exact concepts or formulas to revise, and include up to 5 representative source questions per chapter. " +
+                  "Instead, identify likely chapters/readings, write a concise notes summary for each, list the exact concepts or formulas to revise, identify the LOS-style learning outcomes or checklist items visible in the source, and include up to 5 representative source questions per chapter. " +
                   "Also extract key subtopics that must not be forgotten, the main formulas, common traps, the style/pattern of questions that appear, and where the BA II Plus financial calculator is useful. " +
                   "Return strict JSON with this shape: " +
-                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","losChecklist":[],"revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"sourceCoverageGaps":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
                   "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
               },
             ],
@@ -216,6 +216,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
       mode = "standard",
       focusTopics = [],
       baseQuestions = [],
+      existingQuestions = [],
+      missingTopics = [],
+      coverageChecklist = [],
     } = req.body || {};
 
     if (!String(chapterTitle).trim()) {
@@ -248,6 +251,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
                 "Difficulty 1 means normal concept/application. Difficulty 2 means exam-style and moderately challenging. Difficulty 3 means hard, trap-aware, and computation-ready when appropriate. " +
                 "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
                 "Use the same style and pattern of questioning suggested by the source material when possible. " +
+                "Prioritize uncovered or weak topics first when missingTopics are supplied. " +
+                "Do not repeat or lightly paraphrase existingQuestions. Treat near-duplicate questions as invalid. " +
+                "Use coverageChecklist to understand the full chapter scope, and use missingTopics as the highest-priority targets. " +
                 "For numerical questions, mention BA II Plus usage in the explanation when it would realistically help on the exam. " +
                 "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
                 "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
@@ -268,6 +274,9 @@ app.post("/api/generate-practice-set", async (req, res) => {
                 mode,
                 focusTopics,
                 baseQuestions,
+                existingQuestions,
+                missingTopics,
+                coverageChecklist,
                 aiSummary,
                 chapter,
               }),
