@@ -31,6 +31,17 @@ export function formatShortDate(iso?: string) {
   }).format(date);
 }
 
+export function formatLongDate(iso?: string) {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 export function formatInputDate(iso?: string) {
   if (!iso) return "";
   const date = new Date(iso);

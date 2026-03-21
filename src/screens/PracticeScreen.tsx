@@ -1083,6 +1083,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   bottomSpacer: {
-    height: 220,
+    height: 320,
   },
 });

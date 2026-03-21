@@ -2,7 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
-import { formatShortDate } from "../utils/study";
+import { formatLongDate, formatShortDate } from "../utils/study";
 
 type ReadingItem = {
   id: string;
@@ -19,6 +19,7 @@ export function OverviewScreen({
   dueTomorrowReadings,
   overdueReadings,
   todayPlan,
+  planEndDate,
   notificationsEnabled,
   onEnableNotifications,
   onOpenWeekly,
@@ -28,6 +29,7 @@ export function OverviewScreen({
   dueTomorrowReadings: ReadingItem[];
   overdueReadings: ReadingItem[];
   todayPlan: { current: ReadingItem[]; due: ReadingItem[] };
+  planEndDate: string;
   notificationsEnabled: boolean;
   onEnableNotifications: () => Promise<boolean>;
   onOpenWeekly: () => void;
@@ -37,6 +39,11 @@ export function OverviewScreen({
 
   return (
     <>
+      <View style={styles.planEndCard}>
+        <Text style={styles.planEndLabel}>Plan ends</Text>
+        <Text style={styles.planEndValue}>{formatLongDate(planEndDate)}</Text>
+      </View>
+
       <Panel title="Today" icon="sunny-outline">
         <View style={styles.summaryCard}>
           <Text style={styles.sectionTitle}>This week completion</Text>
@@ -132,6 +139,27 @@ export function OverviewScreen({
 }
 
 const styles = StyleSheet.create({
+  planEndCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  planEndLabel: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  planEndValue: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "800",
+  },
   summaryCard: {
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
