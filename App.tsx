@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
-import { MetricCard, MiniStat } from "./src/components/ui";
+import { MetricCard } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
 import { OverviewScreen } from "./src/screens/OverviewScreen";
@@ -184,11 +184,7 @@ export default function App() {
                   <Text style={styles.sectionLabel}>Study setup</Text>
                   <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
                 </View>
-                <View style={styles.setupStatsRow}>
-                  <MiniStat label="Start date" value={formatInputDate(study.studyState.startDate)} />
-                  <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
-                  <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
-                </View>
+                <Text style={styles.setupMeta}>Plan starts on {formatInputDate(study.studyState.startDate)}</Text>
                 {setupExpanded ? (
                   <TextInput
                     value={studySetupDate}
@@ -395,6 +391,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  setupMeta: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   sectionLabel: {
     fontSize: 13,
     fontWeight: "800",
@@ -411,11 +412,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: colors.ink,
     fontSize: 14,
-  },
-  setupStatsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
   },
   tabRow: {
     gap: 10,
