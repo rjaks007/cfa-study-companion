@@ -229,6 +229,9 @@ export function defaultUploads() {
     generatedAnswers: {},
     generatedReview: null,
     practiceHistory: [],
+    savedSets: [],
+    savedQuestions: [],
+    wrongQuestions: [],
   }));
 }
 

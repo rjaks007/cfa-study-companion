@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
+
+type PracticeSection = "generate" | "saved" | "review" | "assistant";
 
 function normalizeDifficultyLabel(value: PracticeDifficulty) {
   if (value === "1") return "Level 1 · Normal";
@@ -44,6 +46,11 @@ export function PracticeScreen({
   askPracticeAssistant,
   generatePracticeSet,
   answerGeneratedQuestion,
+  saveCurrentPracticeSet,
+  openSavedPracticeSet,
+  deleteSavedPracticeSet,
+  savePracticeQuestion,
+  deleteSavedQuestion,
   analyzeGeneratedPractice,
   targetSubject,
   targetChapterTitle,
@@ -65,6 +72,11 @@ export function PracticeScreen({
     options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[] },
   ) => Promise<unknown>;
   answerGeneratedQuestion: (subject: Subject, questionId: string, selectedOption: string) => void;
+  saveCurrentPracticeSet: (subject: Subject) => void;
+  openSavedPracticeSet: (subject: Subject, savedSetId: string) => void;
+  deleteSavedPracticeSet: (subject: Subject, savedSetId: string) => void;
+  savePracticeQuestion: (subject: Subject, question: PracticeQuestion, options?: { reason?: "bookmark" | "wrong-answer"; chapterTitle?: string; difficulty?: PracticeDifficulty }) => void;
+  deleteSavedQuestion: (subject: Subject, questionId: string, bucket: "savedQuestions" | "wrongQuestions") => void;
   analyzeGeneratedPractice: (subject: Subject) => Promise<unknown>;
   targetSubject?: Subject;
   targetChapterTitle?: string;
@@ -79,10 +91,12 @@ export function PracticeScreen({
   const [showUploads, setShowUploads] = useState(false);
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState("");
-  const [assistantImageUrl, setAssistantImageUrl] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [activeSection, setActiveSection] = useState<PracticeSection>("generate");
+  const [returnQuestionId, setReturnQuestionId] = useState("");
+  const [highlightedQuestionId, setHighlightedQuestionId] = useState("");
 
   useEffect(() => {
     if (!selectedSubject && parsedSubjects[0]) {
@@ -93,6 +107,7 @@ export function PracticeScreen({
   useEffect(() => {
     if (!targetSubject) return;
     setSelectedSubject(targetSubject);
+    setActiveSection("generate");
   }, [targetSubject]);
 
   const activeUpload = uploads.find((upload) => upload.subject === selectedSubject) || null;
@@ -100,6 +115,7 @@ export function PracticeScreen({
   useEffect(() => {
     if (targetChapterTitle && activeUpload?.parsedChapters.some((chapter) => chapter.readingTitle === targetChapterTitle)) {
       setSelectedChapter(targetChapterTitle);
+      setActiveSection("generate");
       onConsumeTarget?.();
       return;
     }
@@ -110,7 +126,7 @@ export function PracticeScreen({
     if (!selectedChapter || !activeUpload.parsedChapters.some((chapter) => chapter.readingTitle === selectedChapter)) {
       setSelectedChapter(activeUpload.parsedChapters[0]?.readingTitle || "");
     }
-  }, [activeUpload, selectedChapter]);
+  }, [activeUpload, onConsumeTarget, selectedChapter, targetChapterTitle]);
 
   const generatedStats = useMemo(() => (activeUpload ? generatedSummary(activeUpload) : { total: 0, answered: 0, correct: 0, wrong: 0, accuracy: 0 }), [activeUpload]);
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
@@ -140,6 +156,18 @@ export function PracticeScreen({
       }),
     [chapterHistory],
   );
+  const savedSetsForChapter = useMemo(
+    () => activeUpload?.savedSets.filter((entry) => entry.chapterTitle === selectedChapter) || [],
+    [activeUpload?.savedSets, selectedChapter],
+  );
+  const savedBookmarksForChapter = useMemo(
+    () => activeUpload?.savedQuestions.filter((entry) => entry.chapterTitle === selectedChapter) || [],
+    [activeUpload?.savedQuestions, selectedChapter],
+  );
+  const wrongQuestionLibrary = useMemo(
+    () => activeUpload?.wrongQuestions.filter((entry) => entry.chapterTitle === selectedChapter) || [],
+    [activeUpload?.wrongQuestions, selectedChapter],
+  );
 
   async function handlePick(subject: Subject, type: "notesPdfName" | "questionBankPdfName") {
     try {
@@ -158,11 +186,17 @@ export function PracticeScreen({
     }
   }
 
-  async function handleGeneratePractice() {
+  async function handleGeneratePractice(options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[]; count?: number }) {
     if (!selectedSubject || !selectedChapter) return;
     try {
       setGenerating(true);
-      await generatePracticeSet(selectedSubject, selectedChapter, Number(questionCount || 10), difficulty);
+      await generatePracticeSet(selectedSubject, selectedChapter, options?.count || Number(questionCount || 10), difficulty, {
+        mode: options?.mode,
+        focusTopics: options?.focusTopics,
+        baseQuestions: options?.baseQuestions,
+      });
+      setActiveSection("generate");
+      setHighlightedQuestionId("");
       Alert.alert("Practice set ready", "Your new question set is ready below.");
     } catch (error) {
       Alert.alert("Generation failed", error instanceof Error ? error.message : "The practice set could not be created.");
@@ -176,6 +210,7 @@ export function PracticeScreen({
     try {
       setAnalyzing(true);
       await analyzeGeneratedPractice(selectedSubject);
+      setActiveSection("review");
       Alert.alert("Review ready", "Your weak-topic summary and study examples are ready below.");
     } catch (error) {
       Alert.alert("Analysis failed", error instanceof Error ? error.message : "The practice review could not be created.");
@@ -184,17 +219,19 @@ export function PracticeScreen({
     }
   }
 
-  async function handleAskAssistant() {
-    if (!selectedSubject || !assistantQuestion.trim()) return;
+  async function handleAskAssistant(extraContext?: Record<string, unknown>, directQuestion?: string) {
+    const prompt = String(directQuestion || assistantQuestion).trim();
+    if (!selectedSubject || !prompt) return;
     try {
       setAssistantLoading(true);
-      const result = await askPracticeAssistant(selectedSubject, assistantQuestion.trim(), {
+      const result = await askPracticeAssistant(selectedSubject, prompt, {
         chapterTitle: selectedChapter,
         generatedReview: activeUpload?.generatedReview,
         confidence: activeReading?.confidence || 0,
+        ...extraContext,
       });
       setAssistantAnswer(result.answer);
-      setAssistantImageUrl(result.imageUrl);
+      setActiveSection("assistant");
     } catch (error) {
       Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
     } finally {
@@ -204,18 +241,26 @@ export function PracticeScreen({
 
   async function runAssistantPreset(prompt: string, extraContext?: Record<string, unknown>) {
     if (!selectedSubject) return;
+    setAssistantQuestion(prompt);
+    await handleAskAssistant(extraContext, prompt);
+  }
+
+  async function explainWrongAnswer(question: PracticeQuestion) {
+    const selected = activeUpload?.generatedAnswers[question.id] || "";
+    if (!selectedSubject || !selected) return;
+    setAssistantQuestion(`Explain why my answer was wrong in ${question.question}`);
+    setReturnQuestionId(question.id);
+    setHighlightedQuestionId(question.id);
+    setActiveSection("assistant");
     try {
       setAssistantLoading(true);
-      setAssistantQuestion(prompt);
-      const result = await askPracticeAssistant(selectedSubject, prompt, {
+      const result = await askPracticeAssistant(selectedSubject, `Explain why my answer was wrong in ${question.question}`, {
+        mode: "explain-wrong-answer",
         chapterTitle: selectedChapter,
-        generatedReview: activeUpload?.generatedReview,
-        generatedSet: activeUpload?.generatedSet,
-        confidence: activeReading?.confidence || 0,
-        ...extraContext,
+        wrongQuestion: question,
+        selectedAnswer: selected,
       });
       setAssistantAnswer(result.answer);
-      setAssistantImageUrl(result.imageUrl);
     } catch (error) {
       Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
     } finally {
@@ -223,145 +268,128 @@ export function PracticeScreen({
     }
   }
 
-  async function explainWrongAnswer(question: PracticeQuestion) {
-    const selected = activeUpload?.generatedAnswers[question.id] || "";
-    if (!selectedSubject || !selected) return;
-    await runAssistantPreset(`Explain why my answer was wrong in ${question.question}`, {
-      mode: "explain-wrong-answer",
+  function handleSaveCurrentSet() {
+    if (!selectedSubject || !activeUpload?.generatedSet) return;
+    saveCurrentPracticeSet(selectedSubject);
+    Alert.alert("Saved", "This practice set is now in Saved sets.");
+  }
+
+  function handleBookmarkQuestion(question: PracticeQuestion) {
+    if (!selectedSubject) return;
+    savePracticeQuestion(selectedSubject, question, {
+      reason: "bookmark",
       chapterTitle: selectedChapter,
-      wrongQuestion: question,
-      selectedAnswer: selected,
+      difficulty,
     });
+    Alert.alert("Saved", "Question added to your saved questions.");
   }
 
-  async function generateSimilarFive() {
-    if (!selectedSubject || !selectedChapter) return;
-    try {
-      setGenerating(true);
-      await generatePracticeSet(selectedSubject, selectedChapter, 5, difficulty, {
-        mode: "similar-questions",
-        focusTopics: activeUpload?.generatedReview?.reviseTopics || [],
-        baseQuestions: wrongGeneratedQuestions.slice(0, 5),
-      });
-      Alert.alert("Ready", "Five similar reinforcement questions are ready below.");
-    } catch (error) {
-      Alert.alert("Generation failed", error instanceof Error ? error.message : "Similar questions could not be created.");
-    } finally {
-      setGenerating(false);
-    }
+  function jumpBackToQuestion() {
+    setActiveSection("generate");
   }
 
-  async function retryWeakTopics() {
-    if (!selectedSubject || !selectedChapter) return;
-    try {
-      setGenerating(true);
-      await generatePracticeSet(selectedSubject, selectedChapter, Number(questionCount || 10), difficulty, {
-        mode: "weak-topics-retry",
-        focusTopics: activeUpload?.generatedReview?.reviseTopics || [],
-        baseQuestions: wrongGeneratedQuestions,
-      });
-      Alert.alert("Ready", "A weak-topic retry set is ready below.");
-    } catch (error) {
-      Alert.alert("Generation failed", error instanceof Error ? error.message : "Weak-topic retry could not be created.");
-    } finally {
-      setGenerating(false);
-    }
+  function sectionButton(section: PracticeSection, label: string) {
+    return (
+      <Pressable key={section} style={[styles.sectionChip, activeSection === section && styles.sectionChipActive]} onPress={() => setActiveSection(section)}>
+        <Text style={[styles.sectionChipText, activeSection === section && styles.sectionChipTextActive]}>{label}</Text>
+      </Pressable>
+    );
   }
 
   return (
     <>
-      <Panel title="Generate practice set" icon="create-outline">
-        {parsedSubjects.length ? (
-          <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
-              {parsedSubjects.map((upload) => (
-                <Pressable
-                  key={upload.subject}
-                  style={[styles.subjectChip, selectedSubject === upload.subject && styles.subjectChipActive]}
-                  onPress={() => setSelectedSubject(upload.subject)}
-                >
-                  <Text style={[styles.subjectChipText, selectedSubject === upload.subject && styles.subjectChipTextActive]}>{upload.subject}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+      <View style={styles.sectionSwitch}>
+        {sectionButton("generate", "Generate")}
+        {sectionButton("saved", "Saved")}
+        {sectionButton("review", "Review")}
+        {sectionButton("assistant", "Assistant")}
+      </View>
 
-            {activeUpload ? (
+      {activeSection === "generate" ? (
+        <>
+          <Panel title="Generate practice set" icon="create-outline">
+            {parsedSubjects.length ? (
               <>
-                <Text style={styles.sectionLabel}>Chapter</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
-                  {activeUpload.parsedChapters.map((chapter) => (
+                  {parsedSubjects.map((upload) => (
                     <Pressable
-                      key={chapter.id}
-                      style={[styles.chapterChip, selectedChapter === chapter.readingTitle && styles.chapterChipActive]}
-                      onPress={() => setSelectedChapter(chapter.readingTitle)}
+                      key={upload.subject}
+                      style={[styles.subjectChip, selectedSubject === upload.subject && styles.subjectChipActive]}
+                      onPress={() => setSelectedSubject(upload.subject)}
                     >
-                      <Text style={[styles.chapterChipText, selectedChapter === chapter.readingTitle && styles.chapterChipTextActive]}>{chapter.readingTitle}</Text>
+                      <Text style={[styles.subjectChipText, selectedSubject === upload.subject && styles.subjectChipTextActive]}>{upload.subject}</Text>
                     </Pressable>
                   ))}
                 </ScrollView>
 
-                {activeParsedChapter ? (
-                  <View style={styles.summaryCard}>
-                    <Text style={styles.cardTitle}>Chapter source</Text>
-                    {activeParsedChapter.notesSummary ? <Text style={styles.metaText}>{activeParsedChapter.notesSummary}</Text> : null}
-                    {activeParsedChapter.keySubtopics.length ? (
-                      <>
-                        <Text style={styles.sectionLabel}>Must-cover topics</Text>
-                        <View style={styles.badgeWrap}>
-                          {activeParsedChapter.keySubtopics.map((topic) => (
-                            <Badge key={topic} text={topic} tone="accent" />
-                          ))}
-                        </View>
-                      </>
-                    ) : null}
-                    {activeParsedChapter.formulas.length ? (
-                      <>
-                        <Text style={styles.sectionLabel}>Core formulas</Text>
-                        <View style={styles.badgeWrap}>
-                          {activeParsedChapter.formulas.map((formula) => (
-                            <Badge key={formula} text={formula} tone="warning" />
-                          ))}
-                        </View>
-                      </>
-                    ) : null}
-                    {activeParsedChapter.calculatorGuidance.length ? (
-                      <>
-                        <Text style={styles.sectionLabel}>BA II Plus</Text>
-                        <Text style={styles.metaText}>{activeParsedChapter.calculatorGuidance.join(" ")}</Text>
-                      </>
-                    ) : null}
-                    {activeParsedChapter.revisionFocus.length ? (
-                      <View style={styles.badgeWrap}>
-                        {activeParsedChapter.revisionFocus.map((topic) => (
-                          <Badge key={topic} text={topic} tone="accent" />
-                        ))}
+                {activeUpload ? (
+                  <>
+                    <Text style={styles.sectionLabel}>Chapter</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
+                      {activeUpload.parsedChapters.map((chapter) => (
+                        <Pressable
+                          key={chapter.id}
+                          style={[styles.chapterChip, selectedChapter === chapter.readingTitle && styles.chapterChipActive]}
+                          onPress={() => setSelectedChapter(chapter.readingTitle)}
+                        >
+                          <Text style={[styles.chapterChipText, selectedChapter === chapter.readingTitle && styles.chapterChipTextActive]}>{chapter.readingTitle}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+
+                    {activeParsedChapter ? (
+                      <View style={styles.summaryCard}>
+                        <Text style={styles.cardTitle}>Chapter source</Text>
+                        {activeParsedChapter.notesSummary ? <Text style={styles.metaText}>{activeParsedChapter.notesSummary}</Text> : null}
+                        {activeParsedChapter.keySubtopics.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>Must-cover topics</Text>
+                            <View style={styles.badgeWrap}>
+                              {activeParsedChapter.keySubtopics.map((topic) => (
+                                <Badge key={topic} text={topic} tone="accent" />
+                              ))}
+                            </View>
+                          </>
+                        ) : null}
+                        {activeParsedChapter.formulas.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>Core formulas</Text>
+                            <View style={styles.badgeWrap}>
+                              {activeParsedChapter.formulas.map((formula) => (
+                                <Badge key={formula} text={formula} tone="warning" />
+                              ))}
+                            </View>
+                          </>
+                        ) : null}
+                        {activeParsedChapter.calculatorGuidance.length ? (
+                          <>
+                            <Text style={styles.sectionLabel}>BA II Plus</Text>
+                            <Text style={styles.metaText}>{activeParsedChapter.calculatorGuidance.join(" ")}</Text>
+                          </>
+                        ) : null}
                       </View>
                     ) : null}
-                  </View>
-                ) : null}
 
-                <View style={styles.summaryCard}>
-                  <Text style={styles.cardTitle}>Solved so far</Text>
-                  {chapterHistory.length ? (
-                    <View style={styles.levelSummaryWrap}>
-                      {historyByDifficulty.map((item) => (
-                        <View key={item.difficulty} style={styles.levelSummaryCard}>
-                          <Text style={styles.levelSummaryTitle}>{normalizeDifficultyLabel(item.difficulty)}</Text>
-                          <Text style={styles.metaText}>{item.attempted} solved</Text>
-                          <Text style={styles.metaText}>
-                            {item.correct} correct · {item.wrong} wrong
-                          </Text>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.cardTitle}>Solved so far</Text>
+                      {chapterHistory.length ? (
+                        <View style={styles.levelSummaryWrap}>
+                          {historyByDifficulty.map((item) => (
+                            <View key={item.difficulty} style={styles.levelSummaryCard}>
+                              <Text style={styles.levelSummaryTitle}>{normalizeDifficultyLabel(item.difficulty)}</Text>
+                              <Text style={styles.metaText}>{item.attempted} solved</Text>
+                              <Text style={styles.metaText}>
+                                {item.correct} correct · {item.wrong} wrong
+                              </Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
+                      ) : (
+                        <Text style={styles.metaText}>No saved practice history for this chapter yet.</Text>
+                      )}
                     </View>
-                  ) : (
-                    <Text style={styles.metaText}>No saved practice history for this chapter yet.</Text>
-                  )}
-                </View>
 
-                <View style={styles.configCard}>
-                  <View style={styles.configRow}>
-                    <View style={styles.flex}>
+                    <View style={styles.configCard}>
                       <Text style={styles.sectionLabel}>How many questions?</Text>
                       <TextInput
                         value={questionCount}
@@ -371,273 +399,415 @@ export function PracticeScreen({
                         placeholder="10"
                         placeholderTextColor={colors.inkSoft}
                       />
+                      <Text style={styles.sectionLabel}>Difficulty</Text>
+                      <View style={styles.inlineRow}>
+                        {(["1", "2", "3"] as PracticeDifficulty[]).map((level) => (
+                          <Pressable key={level} style={[styles.levelChip, difficulty === level && styles.levelChipActive]} onPress={() => setDifficulty(level)}>
+                            <Text style={[styles.levelChipText, difficulty === level && styles.levelChipTextActive]}>{normalizeDifficultyLabel(level)}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
                     </View>
+
+                    <ActionButton label={generating ? "Generating..." : "Create practice set"} icon="flash-outline" onPress={() => void handleGeneratePractice()} />
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <EmptyState text="Sync at least one subject with AI first." />
+            )}
+          </Panel>
+
+          <Panel title="Current set" icon="list-outline">
+            {activeUpload?.generatedSet ? (
+              <View style={styles.generatedWrap}>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.cardTitle}>{activeUpload.generatedSet.chapterTitle}</Text>
+                  <Text style={styles.metaText}>
+                    {activeUpload.generatedSet.questionCount} questions · {normalizeDifficultyLabel(activeUpload.generatedSet.difficulty)}
+                  </Text>
+                  <View style={styles.badgeWrap}>
+                    <Badge text={`Answered ${generatedStats.answered}/${generatedStats.total}`} tone="accent" />
+                    <Badge text={`Correct ${generatedStats.correct}`} tone="success" />
+                    <Badge text={`Wrong ${generatedStats.wrong}`} tone="danger" />
+                    <Badge text={`Accuracy ${generatedStats.accuracy}%`} tone="warning" />
                   </View>
-                  <Text style={styles.sectionLabel}>Difficulty</Text>
                   <View style={styles.inlineRow}>
-                    {(["1", "2", "3"] as PracticeDifficulty[]).map((level) => (
-                      <Pressable key={level} style={[styles.levelChip, difficulty === level && styles.levelChipActive]} onPress={() => setDifficulty(level)}>
-                        <Text style={[styles.levelChipText, difficulty === level && styles.levelChipTextActive]}>{normalizeDifficultyLabel(level)}</Text>
-                      </Pressable>
-                    ))}
+                    <ActionButton label="Save this set" icon="bookmark-outline" onPress={handleSaveCurrentSet} compact />
+                    <ActionButton label={analyzing ? "Building review..." : "Analyze my weak areas"} icon="analytics-outline" onPress={() => void handleAnalyzePractice()} compact />
                   </View>
                 </View>
 
-                <ActionButton label={generating ? "Generating..." : "Create practice set"} icon="flash-outline" onPress={() => void handleGeneratePractice()} />
-              </>
-            ) : null}
-          </>
-        ) : (
-          <EmptyState text="Sync at least one subject with AI first." />
-        )}
-      </Panel>
+                {activeReading && generatedStats.answered ? (
+                  <View style={styles.summaryCard}>
+                    <Text style={styles.cardTitle}>Confidence calibration</Text>
+                    <Text style={styles.metaText}>
+                      You rated this chapter at {activeReading.confidence}/10, while your current set score is {generatedStats.accuracy}%.
+                    </Text>
+                    <Badge
+                      text={
+                        Math.abs(confidenceGap) <= 10
+                          ? "Confidence and score are aligned"
+                          : confidenceGap > 10
+                            ? "You may be overconfident here"
+                            : "You may know more than your confidence suggests"
+                      }
+                      tone={Math.abs(confidenceGap) <= 10 ? "success" : confidenceGap > 10 ? "warning" : "accent"}
+                    />
+                  </View>
+                ) : null}
 
-      <Panel title="Current set" icon="list-outline">
-        {activeUpload?.generatedSet ? (
-          <View style={styles.generatedWrap}>
-            <View style={styles.summaryCard}>
-              <Text style={styles.cardTitle}>{activeUpload.generatedSet.chapterTitle}</Text>
-              <Text style={styles.metaText}>
-                {activeUpload.generatedSet.questionCount} questions · {normalizeDifficultyLabel(activeUpload.generatedSet.difficulty)}
-              </Text>
-              <View style={styles.badgeWrap}>
-                <Badge text={`Answered ${generatedStats.answered}/${generatedStats.total}`} tone="accent" />
-                <Badge text={`Correct ${generatedStats.correct}`} tone="success" />
-                <Badge text={`Wrong ${generatedStats.wrong}`} tone="danger" />
-                <Badge text={`Accuracy ${generatedStats.accuracy}%`} tone="warning" />
+                {activeUpload.generatedSet.questions.map((question, index) => {
+                  const selected = activeUpload.generatedAnswers[question.id];
+                  const isCorrect = selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
+                  return (
+                    <View key={question.id} style={[styles.questionCard, highlightedQuestionId === question.id && styles.questionCardHighlighted]}>
+                      <Text style={styles.questionTitle}>
+                        Q{index + 1}. {question.question}
+                      </Text>
+                      <View style={styles.optionWrap}>
+                        {question.options.map((option) => {
+                          const chosen = selected === option;
+                          const revealCorrect = Boolean(selected && question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
+                          return (
+                            <Pressable
+                              key={option}
+                              style={[styles.optionButton, chosen && styles.optionButtonSelected, revealCorrect && styles.optionButtonCorrect]}
+                              onPress={() => activeUpload && answerGeneratedQuestion(activeUpload.subject, question.id, option)}
+                            >
+                              <Text style={[styles.optionText, chosen && styles.optionTextSelected, revealCorrect && styles.optionTextCorrect]}>{option}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <View style={styles.inlineRow}>
+                        <ActionButton label="Save question" icon="bookmark-outline" onPress={() => handleBookmarkQuestion(question)} compact />
+                        {!isCorrect && selected && question.answer ? (
+                          <ActionButton label="Explain why wrong" icon="help-circle-outline" onPress={() => void explainWrongAnswer(question)} compact />
+                        ) : null}
+                      </View>
+                      {selected ? (
+                        <View style={styles.feedbackCard}>
+                          <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
+                          {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
+                          {question.explanation ? <Text style={styles.feedbackLine}>{question.explanation}</Text> : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
-            </View>
+            ) : (
+              <EmptyState text="Generate a practice set first." />
+            )}
+          </Panel>
 
-            {activeReading && generatedStats.answered ? (
+          <Panel title="Upload source material" icon="folder-open-outline">
+            <Pressable style={styles.advancedHeader} onPress={() => setShowUploads((current) => !current)}>
+              <Text style={styles.cardTitle}>Notes and question bank</Text>
+              <Badge text={showUploads ? "Hide" : "Show"} tone="accent" />
+            </Pressable>
+            {showUploads ? (
+              <View style={styles.uploadStack}>
+                {uploads.map((upload) => (
+                  <View key={upload.subject} style={styles.sourceCard}>
+                    <View style={styles.sourceHeader}>
+                      <View style={styles.flex}>
+                        <Text style={styles.cardTitle}>{upload.subject}</Text>
+                        <Text style={styles.metaText}>
+                          {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
+                        </Text>
+                      </View>
+                      <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
+                    </View>
+                    <View style={styles.inlineRow}>
+                      <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
+                      <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
+                      {upload.readyForReview ? (
+                        <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
+                      ) : null}
+                    </View>
+                    {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.metaText}>Keep this closed while practicing so the screen stays clean.</Text>
+            )}
+          </Panel>
+
+          <Panel title="Advanced" icon="settings-outline">
+            <Pressable style={styles.advancedHeader} onPress={() => setShowAdvanced((current) => !current)}>
+              <Text style={styles.cardTitle}>Backend connection</Text>
+              <Badge text={showAdvanced ? "Hide" : "Show"} tone="accent" />
+            </Pressable>
+            {showAdvanced ? (
               <View style={styles.summaryCard}>
-                <Text style={styles.cardTitle}>Confidence calibration</Text>
-                <Text style={styles.metaText}>
-                  You rated this chapter at {activeReading.confidence}/10, while your current set score is {generatedStats.accuracy}%.
-                </Text>
-                <Badge
-                  text={
-                    Math.abs(confidenceGap) <= 10
-                      ? "Confidence and score are aligned"
-                      : confidenceGap > 10
-                        ? "You may be overconfident here"
-                        : "You may know more than your confidence suggests"
-                  }
-                  tone={Math.abs(confidenceGap) <= 10 ? "success" : confidenceGap > 10 ? "warning" : "accent"}
+                <Text style={styles.metaText}>Keep this collapsed so the backend URL does not get changed by accident.</Text>
+                <TextInput
+                  value={backendBaseUrl}
+                  onChangeText={setBackendBaseUrl}
+                  style={uiStyles.input}
+                  placeholder="https://your-backend.onrender.com"
+                  placeholderTextColor={colors.inkSoft}
+                  autoCapitalize="none"
+                  autoCorrect={false}
                 />
               </View>
             ) : null}
+          </Panel>
+        </>
+      ) : null}
 
-            {activeUpload.generatedSet.questions.map((question, index) => {
-              const selected = activeUpload.generatedAnswers[question.id];
-              const isCorrect = selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
-              return (
-                <View key={question.id} style={styles.questionCard}>
-                  <Text style={styles.questionTitle}>
-                    Q{index + 1}. {question.question}
-                  </Text>
-                  <View style={styles.optionWrap}>
-                    {question.options.map((option) => {
-                      const chosen = selected === option;
-                      const revealCorrect = Boolean(selected && question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
-                      return (
-                        <Pressable
-                          key={option}
-                          style={[styles.optionButton, chosen && styles.optionButtonSelected, revealCorrect && styles.optionButtonCorrect]}
-                          onPress={() => activeUpload && answerGeneratedQuestion(activeUpload.subject, question.id, option)}
-                        >
-                          <Text style={[styles.optionText, chosen && styles.optionTextSelected, revealCorrect && styles.optionTextCorrect]}>{option}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  {selected ? (
-                    <View style={styles.feedbackCard}>
-                      <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
-                      {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
-                      {question.explanation ? <Text style={styles.feedbackLine}>{question.explanation}</Text> : null}
-                      {!isCorrect && question.answer ? (
-                        <Pressable style={styles.inlineLink} onPress={() => void explainWrongAnswer(question)}>
-                          <Text style={styles.inlineLinkText}>Explain why this answer is wrong</Text>
-                        </Pressable>
-                      ) : null}
+      {activeSection === "saved" ? (
+        <>
+          <Panel title="Saved sets" icon="bookmark-outline">
+            {selectedSubject && savedSetsForChapter.length ? (
+              <View style={styles.stack}>
+                {savedSetsForChapter.map((savedSet) => (
+                  <View key={savedSet.id} style={styles.summaryCard}>
+                    <Text style={styles.cardTitle}>{savedSet.chapterTitle}</Text>
+                    <Text style={styles.metaText}>
+                      {savedSet.questionCount} questions · {normalizeDifficultyLabel(savedSet.difficulty)} · Saved {savedSet.savedAt}
+                    </Text>
+                    <View style={styles.inlineRow}>
+                      <ActionButton
+                        label="Open"
+                        icon="open-outline"
+                        onPress={() => {
+                          openSavedPracticeSet(selectedSubject, savedSet.id);
+                          setDifficulty(savedSet.difficulty);
+                          setSelectedChapter(savedSet.chapterTitle);
+                          setActiveSection("generate");
+                        }}
+                        compact
+                      />
+                      <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteSavedPracticeSet(selectedSubject, savedSet.id)} compact />
                     </View>
-                  ) : null}
-                </View>
-              );
-            })}
-
-            <ActionButton label={analyzing ? "Building review..." : "Analyze my weak areas"} icon="analytics-outline" onPress={() => void handleAnalyzePractice()} />
-          </View>
-        ) : (
-          <EmptyState text="Generate a practice set first." />
-        )}
-      </Panel>
-
-      <Panel title="Review summary" icon="reader-outline">
-        {activeUpload?.generatedReview ? (
-          <View style={styles.summaryCard}>
-            <Text style={styles.cardTitle}>What to study next</Text>
-            <Text style={styles.metaText}>{activeUpload.generatedReview.summary}</Text>
-            {activeUpload.generatedReview.reviseTopics.length ? (
-              <View style={styles.badgeWrap}>
-                {activeUpload.generatedReview.reviseTopics.map((topic) => (
-                  <Badge key={topic} text={topic} tone="accent" />
+                  </View>
                 ))}
               </View>
-            ) : null}
-            {activeUpload.generatedReview.conceptExample ? (
-              <View style={styles.exampleCard}>
-                <Text style={styles.exampleTitle}>Concept example</Text>
-                <Text style={styles.metaText}>{activeUpload.generatedReview.conceptExample}</Text>
-              </View>
-            ) : null}
-            {activeUpload.generatedReview.numericalExample ? (
-              <View style={styles.exampleCard}>
-                <Text style={styles.exampleTitle}>Numerical example</Text>
-                <Text style={styles.metaText}>{activeUpload.generatedReview.numericalExample}</Text>
-              </View>
-            ) : null}
-            <View style={styles.inlineRow}>
-              <ActionButton label={generating ? "Working..." : "Generate 5 similar"} icon="repeat-outline" onPress={() => void generateSimilarFive()} compact />
-              <ActionButton label={generating ? "Working..." : "Retry weak topics"} icon="refresh-outline" onPress={() => void retryWeakTopics()} compact />
-            </View>
-          </View>
-        ) : (
-          <EmptyState text="Finish a generated set, then analyze it to get your weak-topic study summary." />
-        )}
-      </Panel>
+            ) : (
+              <EmptyState text="No saved sets for this chapter yet." />
+            )}
+          </Panel>
 
-      <Panel title="Study assistant" icon="chatbubble-ellipses-outline">
-        <Text style={styles.copy}>
-          Ask about formulas, revision topics, exam tips, or even ask for a visual explanation from the material you uploaded.
-        </Text>
-        {selectedSubject ? (
-          <>
-            <View style={styles.inlineRow}>
-              <ActionButton
-                label="Formula drill mode"
-                icon="calculator-outline"
-                onPress={() =>
-                  void runAssistantPreset(`Create a formula drill for ${selectedChapter || selectedSubject}. Show the key formulas, when to use them, and one quick recall check for each.`, {
-                    mode: "formula-drill",
-                  })
-                }
-                compact
-              />
-              <ActionButton
-                label="Exam coach mode"
-                icon="school-outline"
-                onPress={() =>
-                  void runAssistantPreset(`Coach me for exam-style questions in ${selectedChapter || selectedSubject}. Tell me the common traps, time-saving approach, and how to think under pressure.`, {
-                    mode: "exam-coach",
-                  })
-                }
-                compact
-              />
-              <ActionButton
-                label="Chat with my notes"
-                icon="book-outline"
-                onPress={() =>
-                  void runAssistantPreset(`Use my uploaded notes for ${selectedChapter || selectedSubject} and tell me the most important ideas in plain language.`, {
-                    mode: "chat-with-notes",
-                  })
-                }
-                compact
-              />
-              <ActionButton
-                label="Revision sheet"
-                icon="document-text-outline"
-                onPress={() =>
-                  void runAssistantPreset(`Create a one-page revision sheet for ${selectedChapter || selectedSubject}. Include the exact concepts, formulas, and traps I should revise next.`, {
-                    mode: "revision-sheet",
-                  })
-                }
-                compact
-              />
-            </View>
-            {assistantAnswer ? (
-              <View style={styles.summaryCard}>
-                <Text style={styles.cardTitle}>Assistant answer</Text>
-                <Text style={styles.assistantText}>{assistantAnswer}</Text>
-                {assistantImageUrl ? <Image source={{ uri: assistantImageUrl }} style={styles.assistantImage} resizeMode="contain" /> : null}
-              </View>
-            ) : null}
-            <View style={styles.summaryCard}>
-              <TextInput
-                value={assistantQuestion}
-                onChangeText={setAssistantQuestion}
-                style={[uiStyles.input, styles.chatInput]}
-                placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
-                placeholderTextColor={colors.inkSoft}
-                multiline
-              />
-              <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
-            </View>
-          </>
-        ) : (
-          <EmptyState text="Sync a subject with AI first." />
-        )}
-      </Panel>
-
-      <Panel title="Upload source material" icon="folder-open-outline">
-        <Pressable style={styles.advancedHeader} onPress={() => setShowUploads((current) => !current)}>
-          <Text style={styles.cardTitle}>Notes and question bank</Text>
-          <Badge text={showUploads ? "Hide" : "Show"} tone="accent" />
-        </Pressable>
-        {showUploads ? (
-          <View style={styles.uploadStack}>
-            {uploads.map((upload) => (
-              <View key={upload.subject} style={styles.sourceCard}>
-                <View style={styles.sourceHeader}>
-                  <View style={styles.flex}>
-                    <Text style={styles.cardTitle}>{upload.subject}</Text>
-                    <Text style={styles.metaText}>
-                      {upload.parsedChapters.length ? `${upload.parsedChapters.length} chapters ready` : "Upload both files, then sync with AI"}
-                    </Text>
+          <Panel title="Saved questions" icon="library-outline">
+            {selectedSubject && savedBookmarksForChapter.length ? (
+              <View style={styles.stack}>
+                {savedBookmarksForChapter.map((item) => (
+                  <View key={item.id} style={styles.questionCard}>
+                    <Text style={styles.questionTitle}>{item.question.question}</Text>
+                    <Text style={styles.metaText}>Saved {item.savedAt}</Text>
+                    <View style={styles.inlineRow}>
+                      <ActionButton
+                        label="Ask assistant"
+                        icon="chatbubble-ellipses-outline"
+                        onPress={() => {
+                          const prompt = `Help me revise this saved question: ${item.question.question}`;
+                          setAssistantQuestion(prompt);
+                          setReturnQuestionId("");
+                          setHighlightedQuestionId("");
+                          setActiveSection("assistant");
+                          void handleAskAssistant(
+                            {
+                              mode: "saved-question-help",
+                              savedQuestion: item.question,
+                              chapterTitle: item.chapterTitle,
+                            },
+                            prompt,
+                          );
+                        }}
+                        compact
+                      />
+                      <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteSavedQuestion(selectedSubject, item.id, "savedQuestions")} compact />
+                    </View>
                   </View>
-                  <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
-                </View>
-                <View style={styles.inlineRow}>
-                  <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
-                  <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
-                  {upload.readyForReview ? (
-                    <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
-                  ) : null}
-                </View>
-                {upload.aiError ? <Text style={styles.errorText}>Error: {upload.aiError}</Text> : null}
+                ))}
               </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.metaText}>Keep this closed while practicing so the screen stays clean.</Text>
-        )}
-      </Panel>
+            ) : (
+              <EmptyState text="Bookmark questions from a practice set to revisit them here." />
+            )}
+          </Panel>
+        </>
+      ) : null}
 
-      <Panel
-        title="Advanced"
-        icon="settings-outline"
-      >
-        <Pressable style={styles.advancedHeader} onPress={() => setShowAdvanced((current) => !current)}>
-          <Text style={styles.cardTitle}>Backend connection</Text>
-          <Badge text={showAdvanced ? "Hide" : "Show"} tone="accent" />
-        </Pressable>
-        {showAdvanced ? (
-          <View style={styles.summaryCard}>
-            <Text style={styles.metaText}>Keep this collapsed so the backend URL does not get changed by accident.</Text>
-            <TextInput
-              value={backendBaseUrl}
-              onChangeText={setBackendBaseUrl}
-              style={uiStyles.input}
-              placeholder="https://your-backend.onrender.com"
-              placeholderTextColor={colors.inkSoft}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-        ) : null}
-      </Panel>
+      {activeSection === "review" ? (
+        <>
+          <Panel title="Review summary" icon="reader-outline">
+            {activeUpload?.generatedReview ? (
+              <View style={styles.summaryCard}>
+                <Text style={styles.cardTitle}>What to study next</Text>
+                <Text style={styles.metaText}>{activeUpload.generatedReview.summary}</Text>
+                {activeUpload.generatedReview.reviseTopics.length ? (
+                  <View style={styles.badgeWrap}>
+                    {activeUpload.generatedReview.reviseTopics.map((topic) => (
+                      <Badge key={topic} text={topic} tone="accent" />
+                    ))}
+                  </View>
+                ) : null}
+                {activeUpload.generatedReview.conceptExample ? (
+                  <View style={styles.exampleCard}>
+                    <Text style={styles.exampleTitle}>Concept example</Text>
+                    <Text style={styles.metaText}>{activeUpload.generatedReview.conceptExample}</Text>
+                  </View>
+                ) : null}
+                {activeUpload.generatedReview.numericalExample ? (
+                  <View style={styles.exampleCard}>
+                    <Text style={styles.exampleTitle}>Numerical example</Text>
+                    <Text style={styles.metaText}>{activeUpload.generatedReview.numericalExample}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.inlineRow}>
+                  <ActionButton
+                    label={generating ? "Working..." : "Generate 5 similar"}
+                    icon="repeat-outline"
+                    onPress={() =>
+                      void handleGeneratePractice({
+                        mode: "similar-questions",
+                        focusTopics: activeUpload.generatedReview?.reviseTopics || [],
+                        baseQuestions: wrongGeneratedQuestions.slice(0, 5),
+                        count: 5,
+                      })
+                    }
+                    compact
+                  />
+                  <ActionButton
+                    label={generating ? "Working..." : "Retry weak topics"}
+                    icon="refresh-outline"
+                    onPress={() =>
+                      void handleGeneratePractice({
+                        mode: "weak-topics-retry",
+                        focusTopics: activeUpload.generatedReview?.reviseTopics || [],
+                        baseQuestions: wrongGeneratedQuestions,
+                      })
+                    }
+                    compact
+                  />
+                </View>
+              </View>
+            ) : (
+              <EmptyState text="Finish a generated set, then analyze it to get your weak-topic study summary." />
+            )}
+          </Panel>
 
-      <View style={styles.bottomSpacer} />
+          <Panel title="Wrong questions" icon="warning-outline">
+            {selectedSubject && wrongQuestionLibrary.length ? (
+              <View style={styles.stack}>
+                {wrongQuestionLibrary.map((item) => (
+                  <View key={item.id} style={styles.questionCard}>
+                    <Text style={styles.questionTitle}>{item.question.question}</Text>
+                    <Text style={styles.metaText}>
+                      {normalizeDifficultyLabel(item.difficulty)} · Your answer: {item.selectedAnswer || "Not saved"}
+                    </Text>
+                    <View style={styles.inlineRow}>
+                      <ActionButton
+                        label="Explain"
+                        icon="help-circle-outline"
+                        onPress={() => {
+                          const prompt = `Explain why this answer was wrong: ${item.question.question}`;
+                          setAssistantQuestion(prompt);
+                          setActiveSection("assistant");
+                          setReturnQuestionId("");
+                          void handleAskAssistant(
+                            {
+                              mode: "wrong-library-help",
+                              wrongQuestion: item.question,
+                              selectedAnswer: item.selectedAnswer,
+                              chapterTitle: item.chapterTitle,
+                            },
+                            prompt,
+                          );
+                        }}
+                        compact
+                      />
+                      <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteSavedQuestion(selectedSubject, item.id, "wrongQuestions")} compact />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <EmptyState text="Wrong questions from analyzed sets will collect here for later retry." />
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {activeSection === "assistant" ? (
+        <Panel title="Study assistant" icon="chatbubble-ellipses-outline">
+          <Text style={styles.copy}>Ask about formulas, revision topics, exam tips, or why a question went wrong using your uploaded source material.</Text>
+          {returnQuestionId ? (
+            <View style={styles.inlineRow}>
+              <ActionButton label="Back to question" icon="arrow-back-outline" onPress={jumpBackToQuestion} compact />
+            </View>
+          ) : null}
+          {selectedSubject ? (
+            <>
+              <View style={styles.inlineRow}>
+                <ActionButton
+                  label="Formula drill"
+                  icon="calculator-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Create a formula drill for ${selectedChapter || selectedSubject}. Show the key formulas, when to use them, and one quick recall check for each.`, {
+                      mode: "formula-drill",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Exam coach"
+                  icon="school-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Coach me for exam-style questions in ${selectedChapter || selectedSubject}. Tell me the common traps, time-saving approach, and how to think under pressure.`, {
+                      mode: "exam-coach",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Chat with notes"
+                  icon="book-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Use my uploaded notes for ${selectedChapter || selectedSubject} and tell me the most important ideas in plain language.`, {
+                      mode: "chat-with-notes",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Revision sheet"
+                  icon="document-text-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Create a one-page revision sheet for ${selectedChapter || selectedSubject}. Include the exact concepts, formulas, and traps I should revise next.`, {
+                      mode: "revision-sheet",
+                    })
+                  }
+                  compact
+                />
+              </View>
+              {assistantAnswer ? (
+                <View style={styles.summaryCard}>
+                  <Text style={styles.cardTitle}>Assistant answer</Text>
+                  <Text style={styles.assistantText}>{assistantAnswer}</Text>
+                </View>
+              ) : null}
+              <View style={styles.summaryCard}>
+                <TextInput
+                  value={assistantQuestion}
+                  onChangeText={setAssistantQuestion}
+                  style={[uiStyles.input, styles.chatInput]}
+                  placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
+                  placeholderTextColor={colors.inkSoft}
+                  multiline
+                />
+                <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
+              </View>
+            </>
+          ) : (
+            <EmptyState text="Sync a subject with AI first." />
+          )}
+        </Panel>
+      ) : null}
     </>
   );
 }
@@ -646,6 +816,30 @@ const styles = StyleSheet.create({
   copy: {
     color: colors.inkSoft,
     lineHeight: 20,
+  },
+  sectionSwitch: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  sectionChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  sectionChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  sectionChipText: {
+    color: colors.ink,
+    fontWeight: "800",
+  },
+  sectionChipTextActive: {
+    color: colors.surface,
   },
   sourceCard: {
     backgroundColor: colors.surfaceMuted,
@@ -670,6 +864,9 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  stack: {
+    gap: 12,
   },
   cardTitle: {
     color: colors.ink,
@@ -731,10 +928,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: 14,
-    gap: 10,
-  },
-  configRow: {
-    flexDirection: "row",
     gap: 10,
   },
   sectionLabel: {
@@ -803,6 +996,10 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
+  questionCardHighlighted: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
   questionTitle: {
     color: colors.ink,
     fontWeight: "700",
@@ -855,15 +1052,6 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     lineHeight: 18,
   },
-  inlineLink: {
-    alignSelf: "flex-start",
-    marginTop: 4,
-  },
-  inlineLinkText: {
-    color: colors.primary,
-    fontWeight: "700",
-    fontSize: 13,
-  },
   exampleCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -884,18 +1072,9 @@ const styles = StyleSheet.create({
     color: colors.ink,
     lineHeight: 21,
   },
-  assistantImage: {
-    width: "100%",
-    height: 220,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
-  },
   advancedHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  bottomSpacer: {
-    height: 120,
   },
 });

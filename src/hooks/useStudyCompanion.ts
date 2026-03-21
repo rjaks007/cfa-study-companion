@@ -5,7 +5,25 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
-import { CardDraft, ChapterQuestionSummary, Flashcard, FlashcardRating, GeneratedPracticeReview, GeneratedPracticeSet, PracticeChapter, PracticeDifficulty, PracticeHistoryEntry, PracticeQuestion, SessionDraft, StoredState, StudySession, Subject, UploadRecord } from "../types";
+import {
+  CardDraft,
+  ChapterQuestionSummary,
+  Flashcard,
+  FlashcardRating,
+  GeneratedPracticeReview,
+  GeneratedPracticeSet,
+  PracticeChapter,
+  PracticeDifficulty,
+  PracticeHistoryEntry,
+  PracticeQuestion,
+  SavedPracticeQuestion,
+  SavedPracticeSet,
+  SessionDraft,
+  StoredState,
+  StudySession,
+  Subject,
+  UploadRecord,
+} from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
 import { calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
@@ -136,6 +154,39 @@ function normalizeGeneratedReview(value: unknown): GeneratedPracticeReview | nul
   };
 }
 
+function normalizeSavedSet(value: unknown): SavedPracticeSet | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<SavedPracticeSet>;
+  const questions = normalizePracticeQuestions(record.questions);
+  if (!questions.length) return null;
+  return {
+    id: typeof record.id === "string" ? record.id : makeId("saved-set"),
+    chapterTitle: typeof record.chapterTitle === "string" ? record.chapterTitle : "Saved practice",
+    questionCount: Number(record.questionCount || questions.length),
+    difficulty: (record.difficulty || "1") as PracticeDifficulty,
+    questions,
+    savedAt: typeof record.savedAt === "string" ? record.savedAt : todayISO(),
+    answers: record.answers && typeof record.answers === "object" ? (record.answers as Record<string, string>) : {},
+    review: normalizeGeneratedReview(record.review),
+  };
+}
+
+function normalizeSavedQuestion(value: unknown): SavedPracticeQuestion | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<SavedPracticeQuestion>;
+  const question = normalizePracticeQuestions(record.question ? [record.question] : [])[0];
+  if (!question) return null;
+  return {
+    id: typeof record.id === "string" ? record.id : makeId("saved-question"),
+    chapterTitle: typeof record.chapterTitle === "string" ? record.chapterTitle : "",
+    difficulty: (record.difficulty || "1") as PracticeDifficulty,
+    question,
+    selectedAnswer: typeof record.selectedAnswer === "string" ? record.selectedAnswer : "",
+    savedAt: typeof record.savedAt === "string" ? record.savedAt : todayISO(),
+    reason: record.reason === "wrong-answer" ? "wrong-answer" : "bookmark",
+  };
+}
+
 function normalizeReading(reading: StoredState["readings"][number]) {
   return {
     ...reading,
@@ -178,6 +229,13 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
     generatedAnswers: upload.generatedAnswers || {},
     generatedReview: normalizeGeneratedReview(upload.generatedReview),
     practiceHistory: normalizePracticeHistory(upload.practiceHistory),
+    savedSets: Array.isArray(upload.savedSets) ? upload.savedSets.map(normalizeSavedSet).filter(Boolean) as SavedPracticeSet[] : [],
+    savedQuestions: Array.isArray(upload.savedQuestions)
+      ? upload.savedQuestions.map(normalizeSavedQuestion).filter(Boolean) as SavedPracticeQuestion[]
+      : [],
+    wrongQuestions: Array.isArray(upload.wrongQuestions)
+      ? upload.wrongQuestions.map(normalizeSavedQuestion).filter(Boolean) as SavedPracticeQuestion[]
+      : [],
   };
 }
 
@@ -757,6 +815,9 @@ export function useStudyCompanion() {
           generatedAnswers: {},
           generatedReview: null,
           practiceHistory: upload.practiceHistory,
+          savedSets: upload.savedSets,
+          savedQuestions: upload.savedQuestions,
+          wrongQuestions: upload.wrongQuestions,
         };
         const hasNotes = Boolean(next.notesPdfName);
         const hasQBank = Boolean(next.questionBankPdfName);
@@ -859,6 +920,9 @@ export function useStudyCompanion() {
                 generatedAnswers: {},
                 generatedReview: null,
                 practiceHistory: item.practiceHistory,
+                savedSets: item.savedSets,
+                savedQuestions: item.savedQuestions,
+                wrongQuestions: item.wrongQuestions,
               }
             : item,
         ),
@@ -1058,6 +1122,110 @@ export function useStudyCompanion() {
     }));
   }
 
+  function saveCurrentPracticeSet(subject: Subject) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) => {
+        if (upload.subject !== subject || !upload.generatedSet) return upload;
+
+        const savedSet: SavedPracticeSet = {
+          id: makeId("saved-set"),
+          chapterTitle: upload.generatedSet.chapterTitle,
+          questionCount: upload.generatedSet.questionCount,
+          difficulty: upload.generatedSet.difficulty,
+          questions: upload.generatedSet.questions,
+          savedAt: todayISO(),
+          answers: upload.generatedAnswers,
+          review: upload.generatedReview,
+        };
+
+        return {
+          ...upload,
+          savedSets: [savedSet, ...upload.savedSets],
+        };
+      }),
+    }));
+  }
+
+  function openSavedPracticeSet(subject: Subject, savedSetId: string) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) => {
+        if (upload.subject !== subject) return upload;
+        const savedSet = upload.savedSets.find((item) => item.id === savedSetId);
+        if (!savedSet) return upload;
+        return {
+          ...upload,
+          generatedSet: {
+            id: makeId("generated-set"),
+            chapterTitle: savedSet.chapterTitle,
+            questionCount: savedSet.questionCount,
+            difficulty: savedSet.difficulty,
+            questions: savedSet.questions,
+            createdAt: savedSet.savedAt,
+          },
+          generatedAnswers: savedSet.answers,
+          generatedReview: savedSet.review,
+        };
+      }),
+    }));
+  }
+
+  function deleteSavedPracticeSet(subject: Subject, savedSetId: string) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) =>
+        upload.subject === subject
+          ? {
+              ...upload,
+              savedSets: upload.savedSets.filter((item) => item.id !== savedSetId),
+            }
+          : upload,
+      ),
+    }));
+  }
+
+  function savePracticeQuestion(subject: Subject, question: PracticeQuestion, options?: { reason?: "bookmark" | "wrong-answer"; chapterTitle?: string; difficulty?: PracticeDifficulty }) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) => {
+        if (upload.subject !== subject) return upload;
+
+        const item: SavedPracticeQuestion = {
+          id: makeId(options?.reason === "wrong-answer" ? "wrong-question" : "saved-question"),
+          chapterTitle: options?.chapterTitle || upload.generatedSet?.chapterTitle || "",
+          difficulty: options?.difficulty || upload.generatedSet?.difficulty || "1",
+          question,
+          selectedAnswer: upload.generatedAnswers[question.id] || "",
+          savedAt: todayISO(),
+          reason: options?.reason || "bookmark",
+        };
+
+        const key = `${item.chapterTitle}__${item.question.question}`;
+        const targetList = item.reason === "wrong-answer" ? upload.wrongQuestions : upload.savedQuestions;
+        const deduped = targetList.filter((row) => `${row.chapterTitle}__${row.question.question}` !== key);
+        return {
+          ...upload,
+          [item.reason === "wrong-answer" ? "wrongQuestions" : "savedQuestions"]: [item, ...deduped],
+        };
+      }),
+    }));
+  }
+
+  function deleteSavedQuestion(subject: Subject, questionId: string, bucket: "savedQuestions" | "wrongQuestions") {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((upload) =>
+        upload.subject === subject
+          ? {
+              ...upload,
+              [bucket]: upload[bucket].filter((item) => item.id !== questionId),
+            }
+          : upload,
+      ),
+    }));
+  }
+
   async function analyzeGeneratedPractice(subject: Subject) {
     const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
     if (!backendBaseUrl) throw new Error("Add your backend URL first.");
@@ -1110,12 +1278,44 @@ export function useStudyCompanion() {
                   difficulty: item.generatedSet?.difficulty || upload.generatedSet?.difficulty || "1",
                   attempted,
                   correct,
-                  wrong,
-                  date: todayISO(),
-                },
-                ...item.practiceHistory,
-              ],
-            }
+                wrong,
+                date: todayISO(),
+              },
+              ...item.practiceHistory,
+            ],
+            savedSets: [
+              {
+                id: makeId("saved-set"),
+                chapterTitle: item.generatedSet?.chapterTitle || upload.generatedSet?.chapterTitle || "",
+                difficulty: item.generatedSet?.difficulty || upload.generatedSet?.difficulty || "1",
+                questionCount: item.generatedSet?.questionCount || upload.generatedSet?.questionCount || 0,
+                questions: item.generatedSet?.questions || upload.generatedSet?.questions || [],
+                savedAt: todayISO(),
+                answers: item.generatedAnswers,
+                review,
+              },
+              ...item.savedSets,
+            ],
+            wrongQuestions: [
+              ...(
+                item.generatedSet?.questions || upload.generatedSet?.questions || []
+              )
+                .filter((question) => {
+                  const selected = item.generatedAnswers[question.id] || upload.generatedAnswers[question.id];
+                  return selected && question.answer && selected.trim().toLowerCase() !== question.answer.trim().toLowerCase();
+                })
+                .map((question) => ({
+                  id: makeId("wrong-question"),
+                  chapterTitle: item.generatedSet?.chapterTitle || upload.generatedSet?.chapterTitle || "",
+                  difficulty: item.generatedSet?.difficulty || upload.generatedSet?.difficulty || "1",
+                  question,
+                  selectedAnswer: item.generatedAnswers[question.id] || upload.generatedAnswers[question.id] || "",
+                  savedAt: todayISO(),
+                  reason: "wrong-answer" as const,
+                })),
+              ...item.wrongQuestions,
+            ],
+          }
           : item,
       ),
     }));
@@ -1252,6 +1452,11 @@ export function useStudyCompanion() {
     resetPracticeAnswers,
     generatePracticeSet,
     answerGeneratedQuestion,
+    saveCurrentPracticeSet,
+    openSavedPracticeSet,
+    deleteSavedPracticeSet,
+    savePracticeQuestion,
+    deleteSavedQuestion,
     analyzeGeneratedPractice,
     exportBackup,
     importBackup,

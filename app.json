@@ -6,11 +6,16 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
     "plugins": [
       "expo-notifications"
     ],
     "android": {
-      "package": "com.akss007.cfastudycompanion"
+      "package": "com.akss007.cfastudycompanion",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f4f7fb"
+      }
     },
     "web": {
       "bundler": "metro"

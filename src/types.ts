@@ -166,6 +166,27 @@ export interface PracticeHistoryEntry {
   date: string;
 }
 
+export interface SavedPracticeSet {
+  id: string;
+  chapterTitle: string;
+  questionCount: number;
+  difficulty: PracticeDifficulty;
+  questions: PracticeQuestion[];
+  savedAt: string;
+  answers: Record<string, string>;
+  review: GeneratedPracticeReview | null;
+}
+
+export interface SavedPracticeQuestion {
+  id: string;
+  chapterTitle: string;
+  difficulty: PracticeDifficulty;
+  question: PracticeQuestion;
+  selectedAnswer: string;
+  savedAt: string;
+  reason: "bookmark" | "wrong-answer";
+}
+
 export interface GeneratedPracticeSet {
   id: string;
   chapterTitle: string;
@@ -202,6 +223,9 @@ export interface UploadRecord {
   generatedAnswers: Record<string, string>;
   generatedReview: GeneratedPracticeReview | null;
   practiceHistory: PracticeHistoryEntry[];
+  savedSets: SavedPracticeSet[];
+  savedQuestions: SavedPracticeQuestion[];
+  wrongQuestions: SavedPracticeQuestion[];
 }
 
 export interface MockExam {

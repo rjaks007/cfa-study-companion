@@ -235,6 +235,11 @@ export default function App() {
                   askPracticeAssistant={study.askPracticeAssistant}
                   generatePracticeSet={study.generatePracticeSet}
                   answerGeneratedQuestion={study.answerGeneratedQuestion}
+                  saveCurrentPracticeSet={study.saveCurrentPracticeSet}
+                  openSavedPracticeSet={study.openSavedPracticeSet}
+                  deleteSavedPracticeSet={study.deleteSavedPracticeSet}
+                  savePracticeQuestion={study.savePracticeQuestion}
+                  deleteSavedQuestion={study.deleteSavedQuestion}
                   analyzeGeneratedPractice={study.analyzeGeneratedPractice}
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}
