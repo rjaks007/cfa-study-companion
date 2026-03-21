@@ -82,7 +82,7 @@ export default function App() {
 
   function scrollPracticeBottomIntoView() {
     const ref = scrollRef.current;
-    setTimeout(() => {
+    const scrollToBottom = () => {
       if (!ref) return;
       if (typeof ref.scrollToEnd === "function") {
         ref.scrollToEnd(true);
@@ -91,7 +91,9 @@ export default function App() {
       } else if (typeof ref.scrollTo === "function") {
         ref.scrollTo({ x: 0, y: 100000, animated: true });
       }
-    }, Platform.OS === "android" ? 120 : 80);
+    };
+    setTimeout(scrollToBottom, Platform.OS === "android" ? 120 : 80);
+    setTimeout(scrollToBottom, Platform.OS === "android" ? 320 : 180);
   }
 
   const panResponder = useMemo(
@@ -135,8 +137,8 @@ export default function App() {
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             enableAutomaticScroll
-            extraScrollHeight={Platform.OS === "android" ? 220 : 140}
-            extraHeight={Platform.OS === "android" ? 220 : 140}
+            extraScrollHeight={Platform.OS === "android" ? 300 : 160}
+            extraHeight={Platform.OS === "android" ? 300 : 160}
             keyboardOpeningTime={0}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
@@ -157,35 +159,6 @@ export default function App() {
                   <MetricCard label="This week" value={`${study.weekProgress.done}/${study.weekProgress.total || 0}`} icon="list-outline" />
                   <MetricCard label="Due tomorrow" value={String(study.dueTomorrowReadings.length)} icon="notifications-outline" />
                 </View>
-                <Pressable style={styles.setupCard} onPress={() => setSetupExpanded((current) => !current)}>
-                  <View style={styles.setupHeader}>
-                    <Text style={styles.sectionLabel}>Study setup</Text>
-                    <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
-                  </View>
-                  <View style={styles.setupStatsRow}>
-                    <MiniStat label="Plan end" value={formatInputDate(study.planEndDate)} />
-                    <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
-                    <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
-                  </View>
-                  {setupExpanded ? (
-                    <TextInput
-                      value={studySetupDate}
-                      onChangeText={setStudySetupDate}
-                      onBlur={() => {
-                        const parsed = parseInputDate(studySetupDate);
-                        if (parsed) {
-                          study.setStartDate(parsed);
-                          setStudySetupDate(formatInputDate(parsed));
-                        } else {
-                          setStudySetupDate(formatInputDate(study.studyState.startDate));
-                        }
-                      }}
-                      style={styles.input}
-                      placeholder="DD/MM/YYYY"
-                      placeholderTextColor={colors.inkSoft}
-                    />
-                  ) : null}
-                </Pressable>
               </View>
             ) : null}
 
@@ -195,6 +168,7 @@ export default function App() {
                 dueTomorrowReadings={study.dueTomorrowReadings}
                 overdueReadings={study.overdueReadings}
                 todayPlan={study.todayPlan}
+                planEndDate={study.planEndDate}
                 notificationsEnabled={study.studyState.notificationsEnabled}
                 onEnableNotifications={study.enableReviewNotifications}
                 onOpenWeekly={() => {
@@ -203,6 +177,37 @@ export default function App() {
                 }}
                 onOpenPracticeReading={openPracticeFromOverview}
               />
+            ) : null}
+            {activeTab === "overview" ? (
+              <Pressable style={styles.setupCard} onPress={() => setSetupExpanded((current) => !current)}>
+                <View style={styles.setupHeader}>
+                  <Text style={styles.sectionLabel}>Study setup</Text>
+                  <Ionicons name={setupExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={18} color={colors.inkSoft} />
+                </View>
+                <View style={styles.setupStatsRow}>
+                  <MiniStat label="Start date" value={formatInputDate(study.studyState.startDate)} />
+                  <MiniStat label="Readiness" value={`${study.examReadiness}%`} />
+                  <MiniStat label="Overdue" value={String(study.overdueReadings.length)} />
+                </View>
+                {setupExpanded ? (
+                  <TextInput
+                    value={studySetupDate}
+                    onChangeText={setStudySetupDate}
+                    onBlur={() => {
+                      const parsed = parseInputDate(studySetupDate);
+                      if (parsed) {
+                        study.setStartDate(parsed);
+                        setStudySetupDate(formatInputDate(parsed));
+                      } else {
+                        setStudySetupDate(formatInputDate(study.studyState.startDate));
+                      }
+                    }}
+                    style={styles.input}
+                    placeholder="DD/MM/YYYY"
+                    placeholderTextColor={colors.inkSoft}
+                  />
+                ) : null}
+              </Pressable>
             ) : null}
 
             {activeTab === "weekly" ? (
