@@ -132,10 +132,7 @@ export default function App() {
               scrollRef.current = ref;
             }}
             style={styles.screen}
-            contentContainerStyle={[
-              styles.content,
-              keyboardVisible ? styles.contentKeyboardOpen : activeTab === "practice" ? styles.contentWithTabsPractice : styles.contentWithTabsRest,
-            ]}
+            contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             enableAutomaticScroll
             extraScrollHeight={Platform.OS === "android" ? 250 : 160}
@@ -302,11 +299,8 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? 44 : 24,
     gap: 16,
   },
-  contentWithTabsPractice: {
-    paddingBottom: 18,
-  },
-  contentWithTabsRest: {
-    paddingBottom: 46,
+  contentWithTabs: {
+    paddingBottom: 32,
   },
   contentKeyboardOpen: {
     paddingBottom: 28,

@@ -14,7 +14,7 @@
       "package": "com.akss007.cfastudycompanion",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f4f7fb"
+        "backgroundColor": "#f6f8fb"
       }
     },
     "web": {
