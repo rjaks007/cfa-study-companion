@@ -45,7 +45,6 @@ export function PracticeScreen({
   generatePracticeSet,
   answerGeneratedQuestion,
   analyzeGeneratedPractice,
-  onRequestFocusBottomField,
   targetSubject,
   targetChapterTitle,
   onConsumeTarget,
@@ -67,7 +66,6 @@ export function PracticeScreen({
   ) => Promise<unknown>;
   answerGeneratedQuestion: (subject: Subject, questionId: string, selectedOption: string) => void;
   analyzeGeneratedPractice: (subject: Subject) => Promise<unknown>;
-  onRequestFocusBottomField?: (targetY?: number) => void;
   targetSubject?: Subject;
   targetChapterTitle?: string;
   onConsumeTarget?: () => void;
@@ -85,8 +83,6 @@ export function PracticeScreen({
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [assistantComposerY, setAssistantComposerY] = useState(0);
-  const [advancedY, setAdvancedY] = useState(0);
 
   useEffect(() => {
     if (!selectedSubject && parsedSubjects[0]) {
@@ -566,12 +562,7 @@ export function PracticeScreen({
                 {assistantImageUrl ? <Image source={{ uri: assistantImageUrl }} style={styles.assistantImage} resizeMode="contain" /> : null}
               </View>
             ) : null}
-            <View
-              onLayout={(event) => {
-                setAssistantComposerY(event.nativeEvent.layout.y);
-              }}
-              style={styles.summaryCard}
-            >
+            <View style={styles.summaryCard}>
               <TextInput
                 value={assistantQuestion}
                 onChangeText={setAssistantQuestion}
@@ -579,8 +570,6 @@ export function PracticeScreen({
                 placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
                 placeholderTextColor={colors.inkSoft}
                 multiline
-                onFocus={() => onRequestFocusBottomField?.(assistantComposerY)}
-                onContentSizeChange={() => onRequestFocusBottomField?.(assistantComposerY)}
               />
               <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
             </View>
@@ -628,13 +617,7 @@ export function PracticeScreen({
         title="Advanced"
         icon="settings-outline"
       >
-        <Pressable
-          style={styles.advancedHeader}
-          onLayout={(event) => {
-            setAdvancedY(event.nativeEvent.layout.y);
-          }}
-          onPress={() => setShowAdvanced((current) => !current)}
-        >
+        <Pressable style={styles.advancedHeader} onPress={() => setShowAdvanced((current) => !current)}>
           <Text style={styles.cardTitle}>Backend connection</Text>
           <Badge text={showAdvanced ? "Hide" : "Show"} tone="accent" />
         </Pressable>
@@ -649,11 +632,12 @@ export function PracticeScreen({
               placeholderTextColor={colors.inkSoft}
               autoCapitalize="none"
               autoCorrect={false}
-              onFocus={() => onRequestFocusBottomField?.(advancedY)}
             />
           </View>
         ) : null}
       </Panel>
+
+      <View style={styles.bottomSpacer} />
     </>
   );
 }
@@ -910,5 +894,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  bottomSpacer: {
+    height: 120,
   },
 });

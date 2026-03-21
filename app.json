@@ -6,12 +6,19 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "plugins": ["expo-notifications"],
+    "plugins": [
+      "expo-notifications"
+    ],
     "android": {
       "package": "com.akss007.cfastudycompanion"
     },
     "web": {
       "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e06729dd-de66-4b49-84b4-1421d0dc396b"
+      }
     }
   }
 }

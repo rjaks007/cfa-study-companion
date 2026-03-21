@@ -20,7 +20,6 @@ export default function App() {
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [bottomTabHeight, setBottomTabHeight] = useState(92);
   const scrollRef = useRef<any>(null);
   const study = useStudyCompanion();
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
@@ -39,7 +38,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ y: 0, animated: false });
+    const ref = scrollRef.current;
+    setTimeout(() => {
+      if (!ref) return;
+      if (typeof ref.scrollToPosition === "function") {
+        ref.scrollToPosition(0, 0, false);
+      } else if (typeof ref.scrollTo === "function") {
+        ref.scrollTo({ x: 0, y: 0, animated: false });
+      }
+    }, 0);
   }, [activeTab]);
 
   function openWeeklyForSubject(subject: Subject) {
@@ -71,12 +78,6 @@ export default function App() {
   function openPracticeFromOverview(reading: { subject: string; title: string }) {
     setPracticeTarget({ subject: reading.subject as Subject, chapterTitle: reading.title });
     setActiveTab("practice");
-  }
-
-  function focusBottomField() {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd?.(true);
-    }, 120);
   }
 
   const panResponder = useMemo(
@@ -117,11 +118,7 @@ export default function App() {
               scrollRef.current = ref;
             }}
             style={styles.screen}
-            contentContainerStyle={[
-              styles.content,
-              keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs,
-              { paddingBottom: keyboardVisible ? 28 : bottomTabHeight + 72 },
-            ]}
+            contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             extraScrollHeight={140}
             extraHeight={140}
@@ -219,33 +216,33 @@ export default function App() {
               />
             ) : null}
             {activeTab === "practice" ? (
-              <PracticeScreen
-                uploads={study.studyState.uploads}
-                readings={study.studyState.readings}
-                backendBaseUrl={study.studyState.backendBaseUrl}
-                setBackendBaseUrl={study.setBackendBaseUrl}
-                pickPdf={study.pickPdf}
-                syncSubjectWithAi={study.syncSubjectWithAi}
-                syncingSubject={study.syncingSubject}
-                askPracticeAssistant={study.askPracticeAssistant}
-                generatePracticeSet={study.generatePracticeSet}
-                answerGeneratedQuestion={study.answerGeneratedQuestion}
-                analyzeGeneratedPractice={study.analyzeGeneratedPractice}
-                onRequestFocusBottomField={focusBottomField}
-                targetSubject={practiceTarget.subject}
-                targetChapterTitle={practiceTarget.chapterTitle}
-                onConsumeTarget={clearPracticeTarget}
-              />
+              <>
+                <View style={styles.sectionIntro}>
+                  <Text style={styles.sectionIntroTitle}>Practice</Text>
+                  <Text style={styles.sectionIntroText}>Build chapter sets, review mistakes, and ask for focused help from your source material.</Text>
+                </View>
+                <PracticeScreen
+                  uploads={study.studyState.uploads}
+                  readings={study.studyState.readings}
+                  backendBaseUrl={study.studyState.backendBaseUrl}
+                  setBackendBaseUrl={study.setBackendBaseUrl}
+                  pickPdf={study.pickPdf}
+                  syncSubjectWithAi={study.syncSubjectWithAi}
+                  syncingSubject={study.syncingSubject}
+                  askPracticeAssistant={study.askPracticeAssistant}
+                  generatePracticeSet={study.generatePracticeSet}
+                  answerGeneratedQuestion={study.answerGeneratedQuestion}
+                  analyzeGeneratedPractice={study.analyzeGeneratedPractice}
+                  targetSubject={practiceTarget.subject}
+                  targetChapterTitle={practiceTarget.chapterTitle}
+                  onConsumeTarget={clearPracticeTarget}
+                />
+              </>
             ) : null}
           </KeyboardAwareScrollView>
 
           {!keyboardVisible ? (
-            <View
-              style={styles.bottomTabBar}
-              onLayout={(event) => {
-                setBottomTabHeight(event.nativeEvent.layout.height);
-              }}
-            >
+            <View style={styles.bottomTabBar}>
               {TABS.map((tab) => (
                 <Pressable key={tab.id} style={styles.bottomTab} onPress={() => setActiveTab(tab.id)}>
                   <View style={[styles.bottomTabIconWrap, activeTab === tab.id && styles.bottomTabIconWrapActive]}>
@@ -275,10 +272,12 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 18,
-    paddingTop: Platform.OS === "android" ? 36 : 22,
+    paddingTop: Platform.OS === "android" ? 44 : 24,
     gap: 16,
   },
-  contentWithTabs: {},
+  contentWithTabs: {
+    paddingBottom: 24,
+  },
   contentKeyboardOpen: {
     paddingBottom: 28,
   },
@@ -300,6 +299,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: 16,
+  },
+  sectionIntro: {
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 6,
+  },
+  sectionIntroTitle: {
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  sectionIntroText: {
+    color: colors.inkSoft,
+    lineHeight: 20,
   },
   heroBadge: {
     alignSelf: "flex-start",
@@ -369,12 +385,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   bottomTabBar: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: Platform.OS === "ios" ? 18 : 14,
     backgroundColor: colors.surface,
-    borderRadius: 26,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 8,
