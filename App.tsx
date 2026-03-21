@@ -218,7 +218,10 @@ export default function App() {
             {activeTab === "practice" ? (
               <>
                 <View style={styles.sectionIntro}>
-                  <Text style={styles.sectionIntroTitle}>Practice</Text>
+                  <View style={styles.sectionIntroHeader}>
+                    <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
+                    <Text style={styles.sectionIntroTitle}>Practice</Text>
+                  </View>
                   <Text style={styles.sectionIntroText}>Build chapter sets, review mistakes, and ask for focused help from your source material.</Text>
                 </View>
                 <PracticeScreen
@@ -307,6 +310,11 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 16,
     gap: 6,
+  },
+  sectionIntroHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   sectionIntroTitle: {
     color: colors.ink,
