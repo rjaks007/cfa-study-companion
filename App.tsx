@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   contentWithTabs: {
-    paddingBottom: 24,
+    paddingBottom: 118,
   },
   contentKeyboardOpen: {
     paddingBottom: 28,
@@ -378,6 +378,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   bottomTabBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: colors.surface,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
