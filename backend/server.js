@@ -302,13 +302,22 @@ function parseAnalystPrepModules(rawText) {
     }
 
     if (currentLos) {
-      const shouldStopLos =
-        /^Q\.\d+/i.test(line) ||
-        /^The\s+correct\s+answer\s+is/i.test(line) ||
-        /^Learning\s+Outcome/i.test(line) ||
-        /^CFA\s+Level\s+/i.test(line) ||
-        /^Using\s+the\s+/i.test(line);
-      if (!shouldStopLos) {
+      const canContinueLos =
+        /^[a-z(]/.test(line) &&
+        !/^q\.\d+/i.test(line) &&
+        !/^the\s+correct\s+answer\s+is/i.test(line) &&
+        !/^learning\s+outcome/i.test(line) &&
+        !/^cfa\s+level\s+/i.test(line) &&
+        !/^using\s+the\s+/i.test(line) &&
+        !/^the\s+/i.test(line) &&
+        !/^an?\s+/i.test(line) &&
+        !/^assume\s+/i.test(line) &&
+        !/^there\s+are\s+/i.test(line) &&
+        !/^interest\s+/i.test(line) &&
+        !/^therefore[, ]/i.test(line) &&
+        !/^[1-9]\d*\.\s/.test(line);
+
+      if (canContinueLos) {
         currentLos += ` ${line}`;
         currentModule.notesLines.push(line);
         continue;
