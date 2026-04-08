@@ -21,6 +21,9 @@ export function WeeklyPlanScreen({
   cycleReadingStatus,
   setReadingStudyDate,
   setReadingConfidence,
+  markReviewUpdated,
+  snoozeReview,
+  onOpenPracticeReading,
   resetSubjectForRevision,
   resetAllForRevision,
   targetWeek,
@@ -35,6 +38,9 @@ export function WeeklyPlanScreen({
   cycleReadingStatus: (readingId: string) => void;
   setReadingStudyDate: (readingId: string, date: string) => void;
   setReadingConfidence: (readingId: string, score: number) => void;
+  markReviewUpdated: (readingId: string) => void;
+  snoozeReview: (readingId: string, days?: number) => void;
+  onOpenPracticeReading: (reading: Reading) => void;
   resetSubjectForRevision: (subject: Subject) => void;
   resetAllForRevision: () => void;
   targetWeek?: number;
@@ -118,11 +124,31 @@ export function WeeklyPlanScreen({
 
         <View style={styles.quickRow}>
           <Badge text={`Confidence ${reading.confidence || 0}/10`} tone={reading.confidence >= 8 ? "success" : reading.confidence >= 5 ? "accent" : "neutral"} />
-          <Badge text={reading.nextReview ? `Next ${formatShortDate(reading.nextReview)}` : "No review date"} tone={reading.nextReview ? "warning" : "neutral"} />
+          <Badge text={reading.pendingReview ? "Revision due" : reading.nextReview ? `Next ${formatShortDate(reading.nextReview)}` : "No review date"} tone={reading.pendingReview ? "danger" : reading.nextReview ? "warning" : "neutral"} />
         </View>
 
         {expanded ? (
           <View style={styles.detailWrap}>
+            {reading.pendingReview ? (
+              <View style={styles.reviewDuePanel}>
+                <Text style={styles.reviewDueTitle}>Review due now</Text>
+                <Text style={styles.reviewDueCopy}>
+                  Confirm the revision here after you actually revise the chapter. Opening the chapter alone will not clear it.
+                </Text>
+                <View style={styles.reviewDueActions}>
+                  <Pressable style={styles.markRevisionButton} onPress={() => markReviewUpdated(reading.id)}>
+                    <Text style={styles.markRevisionButtonText}>Mark revised</Text>
+                  </Pressable>
+                  <Pressable style={[styles.markRevisionButton, styles.practiceButton]} onPress={() => onOpenPracticeReading(reading)}>
+                    <Text style={[styles.markRevisionButtonText, styles.practiceButtonText]}>Open practice</Text>
+                  </Pressable>
+                  <Pressable style={[styles.markRevisionButton, styles.snoozeButton]} onPress={() => snoozeReview(reading.id, 1)}>
+                    <Text style={[styles.markRevisionButtonText, styles.snoozeButtonText]}>Snooze 1 day</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.dateRow}>
               <TextInput
                 value={dateValue}
@@ -147,6 +173,7 @@ export function WeeklyPlanScreen({
                 </Pressable>
               ))}
             </View>
+
           </View>
         ) : null}
       </View>
@@ -414,6 +441,55 @@ const styles = StyleSheet.create({
   },
   confidenceTextActive: {
     color: colors.surface,
+  },
+  markRevisionButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  markRevisionButtonText: {
+    color: colors.surface,
+    fontWeight: "800",
+  },
+  reviewDuePanel: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    gap: 10,
+  },
+  reviewDueTitle: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  reviewDueCopy: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  reviewDueActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  practiceButton: {
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  practiceButtonText: {
+    color: colors.ink,
+  },
+  snoozeButton: {
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  snoozeButtonText: {
+    color: colors.inkSoft,
   },
   focusWrap: {
     flexDirection: "row",

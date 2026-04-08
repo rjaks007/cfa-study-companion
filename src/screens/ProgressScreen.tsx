@@ -52,19 +52,25 @@ export function ProgressScreen({
               </Pressable>
 
               {isExpanded ? (
-                <View style={styles.readingGrid}>
+                <View style={styles.readingList}>
                   {subjectReadings.map((reading) => (
-                    <Pressable key={reading.id} style={styles.readingChip} onPress={() => onOpenReading(reading)}>
-                      <Text style={styles.readingChipTitle}>R{reading.readingNumber}</Text>
-                      <Text numberOfLines={2} style={styles.readingChipMeta}>
-                        {reading.title}
-                      </Text>
-                      <View style={styles.badgeWrap}>
-                        <Badge text={`Week ${reading.weekAssigned}`} tone="accent" />
-                        <Badge text={reading.status} tone={reading.status === "done" ? "success" : reading.status === "in-progress" ? "warning" : "neutral"} />
-                        <Badge text={`C${reading.confidence || 0}`} tone={reading.confidence >= 8 ? "success" : reading.confidence >= 5 ? "accent" : "neutral"} />
+                    <Pressable key={reading.id} style={styles.readingRow} onPress={() => onOpenReading(reading)}>
+                      <View style={styles.readingLead}>
+                        <Text style={styles.readingChipTitle}>R{reading.readingNumber}</Text>
+                        <View style={styles.readingTextBlock}>
+                          <Text numberOfLines={1} style={styles.readingRowTitle}>
+                            {reading.title}
+                          </Text>
+                          <Text style={styles.readingChipMeta}>
+                            Rev {reading.reviewHistory.length} · Week {reading.weekAssigned}
+                          </Text>
+                        </View>
                       </View>
-                      <Text style={styles.nextReview}>Next: {formatShortDate(reading.nextReview)}</Text>
+                      <View style={styles.readingMetrics}>
+                        <Badge text={reading.status} tone={reading.status === "done" ? "success" : reading.status === "in-progress" ? "warning" : "neutral"} />
+                        <Badge text={`C${reading.confidence || 0}`} tone={reading.confidence >= 8 ? "success" : reading.confidence >= 5 ? "accent" : "danger"} />
+                        <Badge text={reading.pendingReview ? "Due" : `Next ${formatShortDate(reading.nextReview)}`} tone={reading.pendingReview ? "danger" : "neutral"} />
+                      </View>
                     </Pressable>
                   ))}
                 </View>
@@ -125,39 +131,51 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 13,
   },
-  readingGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+  readingList: {
+    gap: 8,
   },
-  readingChip: {
-    width: "48%",
+  readingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 12,
-    gap: 6,
+    gap: 10,
+  },
+  readingLead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  readingTextBlock: {
+    flex: 1,
   },
   readingChipTitle: {
     color: colors.ink,
     fontWeight: "800",
     fontSize: 12,
+    minWidth: 28,
+  },
+  readingRowTitle: {
+    color: colors.ink,
+    fontWeight: "700",
+    fontSize: 13,
   },
   readingChipMeta: {
     color: colors.inkSoft,
     fontSize: 12,
-    lineHeight: 17,
-    minHeight: 34,
+    marginTop: 3,
   },
-  badgeWrap: {
+  readingMetrics: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-  },
-  nextReview: {
-    color: colors.inkSoft,
-    fontSize: 11,
+    justifyContent: "flex-end",
+    maxWidth: "48%",
   },
   flex: {
     flex: 1,

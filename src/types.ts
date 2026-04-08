@@ -75,6 +75,8 @@ export interface Reading {
   confidence: number;
   lastReviewed: string;
   nextReview: string;
+  pendingReview: boolean;
+  pendingReviewDate: string;
   sessionType: SessionType;
   notes: string;
   memoryMap: string;

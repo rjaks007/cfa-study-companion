@@ -62,6 +62,12 @@ export default function App() {
     setActiveTab("weekly");
   }
 
+  function openWeeklyFromOverview(reading: { id: string }) {
+    const matched = study.readingMap[reading.id];
+    if (!matched) return;
+    openWeeklyForReading(matched);
+  }
+
   function clearWeeklyTarget() {
     setWeeklyTarget({});
   }
@@ -155,7 +161,7 @@ export default function App() {
                   <MetricCard label="Week" value={`${study.currentWeek}/26`} icon="calendar-outline" />
                   <MetricCard label="Syllabus" value={`${study.syllabusProgress}%`} icon="checkmark-circle-outline" />
                   <MetricCard label="This week" value={`${study.weekProgress.done}/${study.weekProgress.total || 0}`} icon="list-outline" />
-                  <MetricCard label="Due tomorrow" value={String(study.dueTomorrowReadings.length)} icon="notifications-outline" />
+                  <MetricCard label="Due now" value={String(study.dueTodayReadings.length)} icon="notifications-outline" />
                 </View>
               </View>
             ) : null}
@@ -163,6 +169,7 @@ export default function App() {
             {activeTab === "overview" ? (
               <OverviewScreen
                 weekProgress={study.weekProgress}
+                dueTodayReadings={study.dueTodayReadings}
                 dueTomorrowReadings={study.dueTomorrowReadings}
                 overdueReadings={study.overdueReadings}
                 todayPlan={study.todayPlan}
@@ -173,7 +180,8 @@ export default function App() {
                   setWeeklyTarget({});
                   setActiveTab("weekly");
                 }}
-                onOpenPracticeReading={openPracticeFromOverview}
+                onOpenStudyReading={openWeeklyFromOverview}
+                onMarkReviewUpdated={study.markReviewUpdated}
               />
             ) : null}
             {activeTab === "overview" ? (
@@ -214,6 +222,9 @@ export default function App() {
                 cycleReadingStatus={study.cycleReadingStatus}
                 setReadingStudyDate={study.setReadingStudyDate}
                 setReadingConfidence={study.setReadingConfidence}
+                markReviewUpdated={study.markReviewUpdated}
+                snoozeReview={study.snoozeReview}
+                onOpenPracticeReading={openPracticeForReading}
                 resetSubjectForRevision={study.resetSubjectForRevision}
                 resetAllForRevision={study.resetAllForRevision}
                 targetWeek={weeklyTarget.week}

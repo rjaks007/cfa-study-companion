@@ -6,6 +6,8 @@ type ReminderReading = {
   readingNumber: number;
   title: string;
   nextReview: string;
+  pendingReview?: boolean;
+  pendingReviewDate?: string;
 };
 
 function withLocalTime(isoDate: string, hours: number) {
@@ -70,15 +72,19 @@ export async function scheduleReviewNotifications(readings: ReminderReading[]) {
 
   const now = new Date();
   const sorted = readings
-    .filter((reading) => reading.nextReview)
-    .sort((left, right) => new Date(left.nextReview).getTime() - new Date(right.nextReview).getTime())
+    .map((reading) => ({
+      ...reading,
+      effectiveReviewDate: reading.pendingReview && reading.pendingReviewDate ? reading.pendingReviewDate : reading.nextReview,
+    }))
+    .filter((reading) => reading.effectiveReviewDate)
+    .sort((left, right) => new Date(left.effectiveReviewDate).getTime() - new Date(right.effectiveReviewDate).getTime())
     .slice(0, 40);
 
   for (const reading of sorted) {
-    const reminderAt = withLocalTime(reading.nextReview, 18);
+    const reminderAt = withLocalTime(reading.effectiveReviewDate, 18);
     reminderAt.setDate(reminderAt.getDate() - 1);
 
-    const dueAt = withLocalTime(reading.nextReview, 8);
+    const dueAt = withLocalTime(reading.effectiveReviewDate, 8);
 
     if (reminderAt.getTime() > now.getTime()) {
       await Notifications.scheduleNotificationAsync({

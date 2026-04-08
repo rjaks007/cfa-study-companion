@@ -13,10 +13,13 @@ type ReadingItem = {
   status: string;
   confidence: number;
   nextReview: string;
+  revisionCycle?: number;
+  reviewHistory?: Array<{ date: string; score: number }>;
 };
 
 export function OverviewScreen({
   weekProgress,
+  dueTodayReadings,
   dueTomorrowReadings,
   overdueReadings,
   todayPlan,
@@ -24,9 +27,11 @@ export function OverviewScreen({
   notificationsEnabled,
   onEnableNotifications,
   onOpenWeekly,
-  onOpenPracticeReading,
+  onOpenStudyReading,
+  onMarkReviewUpdated,
 }: {
   weekProgress: { done: number; total: number; percent: number };
+  dueTodayReadings: ReadingItem[];
   dueTomorrowReadings: ReadingItem[];
   overdueReadings: ReadingItem[];
   todayPlan: { current: ReadingItem[]; due: ReadingItem[] };
@@ -34,9 +39,10 @@ export function OverviewScreen({
   notificationsEnabled: boolean;
   onEnableNotifications: () => Promise<boolean>;
   onOpenWeekly: () => void;
-  onOpenPracticeReading: (reading: ReadingItem) => void;
+  onOpenStudyReading: (reading: ReadingItem) => void;
+  onMarkReviewUpdated: (readingId: string) => void;
 }) {
-  const nextPriority = overdueReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
+  const nextPriority = overdueReadings[0] || dueTodayReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
 
   return (
     <>
@@ -90,7 +96,7 @@ export function OverviewScreen({
       <Panel title="Study now" icon="book-outline">
         {todayPlan.current.length ? (
           todayPlan.current.map((reading) => (
-            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenPracticeReading(reading)}>
+            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
               <View style={styles.flex}>
                 <Text style={styles.rowTitle}>{reading.subject}</Text>
                 <Text style={styles.rowMeta}>
@@ -106,10 +112,35 @@ export function OverviewScreen({
       </Panel>
 
       <Panel title="Reviews" icon="notifications-outline">
+        <Text style={styles.sectionTitle}>Due now</Text>
+        {dueTodayReadings.length ? (
+          dueTodayReadings.slice(0, 6).map((reading) => (
+            <View key={reading.id} style={styles.reviewTaskCard}>
+              <Pressable style={styles.flex} onPress={() => onOpenStudyReading(reading)}>
+                <Text style={styles.rowTitle}>{reading.subject}</Text>
+                <Text style={styles.rowMeta}>
+                  R{reading.readingNumber} · {reading.title}
+                </Text>
+                <Text style={styles.reviewMeta}>
+                  Cycle {reading.revisionCycle || 1} · Revised {reading.reviewHistory?.length || 0} times · Confidence {reading.confidence || 0}/10
+                </Text>
+              </Pressable>
+              <View style={styles.reviewActionWrap}>
+                <Badge text="Due today" tone="danger" />
+                <Pressable style={styles.completeButton} onPress={() => onMarkReviewUpdated(reading.id)}>
+                  <Text style={styles.completeButtonText}>Mark revised</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))
+        ) : (
+          <EmptyState text="No reviews are due right now." />
+        )}
+
         <Text style={styles.sectionTitle}>Due tomorrow</Text>
         {dueTomorrowReadings.length ? (
           dueTomorrowReadings.slice(0, 4).map((reading) => (
-            <View key={reading.id} style={styles.rowCard}>
+            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
               <View style={styles.flex}>
                 <Text style={styles.rowTitle}>{reading.subject}</Text>
                 <Text style={styles.rowMeta}>
@@ -117,7 +148,7 @@ export function OverviewScreen({
                 </Text>
               </View>
               <Badge text="Tomorrow" tone="warning" />
-            </View>
+            </Pressable>
           ))
         ) : (
           <EmptyState text="No reviews are due tomorrow." />
@@ -126,7 +157,7 @@ export function OverviewScreen({
         <Text style={styles.sectionTitle}>Overdue</Text>
         {overdueReadings.length ? (
           overdueReadings.slice(0, 4).map((reading) => (
-            <View key={reading.id} style={styles.rowCard}>
+            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
               <View style={styles.flex}>
                 <Text style={styles.rowTitle}>{reading.subject}</Text>
                 <Text style={styles.rowMeta}>
@@ -134,7 +165,7 @@ export function OverviewScreen({
                 </Text>
               </View>
               <Badge text="Overdue" tone="danger" />
-            </View>
+            </Pressable>
           ))
         ) : (
           <EmptyState text="No overdue reviews right now." />
@@ -247,6 +278,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  reviewTaskCard: {
+    flexDirection: "row",
+    gap: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "flex-start",
+  },
   rowTitle: {
     color: colors.ink,
     fontWeight: "700",
@@ -259,5 +300,26 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  reviewMeta: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 17,
+  },
+  reviewActionWrap: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  completeButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  completeButtonText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 12,
   },
 });

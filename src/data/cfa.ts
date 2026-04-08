@@ -123,6 +123,8 @@ export function buildReadings() {
         confidence: 0,
         lastReviewed: "",
         nextReview: "",
+        pendingReview: false,
+        pendingReviewDate: "",
         sessionType: "Reading",
         notes: "",
         memoryMap: "",

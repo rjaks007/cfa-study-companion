@@ -25,7 +25,7 @@ import {
   UploadRecord,
 } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
-import { calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
+import { addDays, calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
 
 function parseStructuredAiOutput(content: string) {
@@ -290,7 +290,20 @@ function normalizeReading(reading: StoredState["readings"][number]) {
     reviewHistory: Array.isArray(reading.reviewHistory) ? reading.reviewHistory : [],
     questionProgress: reading.questionProgress || emptyQuestionProgress(),
     revisionCycle: reading.revisionCycle || 1,
+    pendingReview: Boolean(reading.pendingReview),
+    pendingReviewDate: reading.pendingReviewDate || "",
   };
+}
+
+function isReadingReviewPending(reading: StoredState["readings"][number]) {
+  if (reading.pendingReview && reading.pendingReviewDate) return true;
+  return Boolean(reading.nextReview && diffDays(reading.nextReview) <= 0);
+}
+
+function getPendingReviewDate(reading: StoredState["readings"][number]) {
+  if (reading.pendingReview && reading.pendingReviewDate) return reading.pendingReviewDate;
+  if (reading.nextReview && diffDays(reading.nextReview) <= 0) return reading.nextReview;
+  return "";
 }
 
 function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): UploadRecord {
@@ -414,6 +427,29 @@ export function useStudyCompanion() {
     });
   }, [isHydrated, studyState.notificationsEnabled, studyState.readings]);
 
+  useEffect(() => {
+    if (!isHydrated) return;
+    const nextReadings = studyState.readings.map((reading) => {
+      if (!reading.pendingReview && reading.nextReview && diffDays(reading.nextReview) <= 0) {
+        return {
+          ...reading,
+          pendingReview: true,
+          pendingReviewDate: reading.nextReview,
+        };
+      }
+      return reading;
+    });
+
+    const changed = nextReadings.some((reading, index) => {
+      const current = studyState.readings[index];
+      return reading.pendingReview !== current.pendingReview || reading.pendingReviewDate !== current.pendingReviewDate;
+    });
+
+    if (changed) {
+      setStudyState((current) => ({ ...current, readings: nextReadings, weeks: buildWeeks(nextReadings) }));
+    }
+  }, [isHydrated, studyState.readings]);
+
   const readingMap = useMemo(
     () => Object.fromEntries(studyState.readings.map((reading) => [reading.id, reading])),
     [studyState.readings],
@@ -457,7 +493,11 @@ export function useStudyCompanion() {
   const currentWeekObj = studyState.weeks.find((week) => week.week === currentWeek) || studyState.weeks[0];
   const currentWeekReadings = currentWeekObj.readings.map((id) => readingMap[id]).filter(Boolean);
   const backlogReadings = studyState.readings.filter((reading) => reading.weekAssigned < currentWeek && reading.status !== "done");
-  const dueReadingReviews = studyState.readings.filter((reading) => reading.nextReview && diffDays(reading.nextReview) <= 0);
+  const dueReadingReviews = studyState.readings.filter((reading) => isReadingReviewPending(reading));
+  const dueTodayReadings = studyState.readings.filter((reading) => {
+    const dueDate = getPendingReviewDate(reading);
+    return dueDate && diffDays(dueDate) === 0;
+  });
   const dueCards = studyState.cards.filter((card) => !card.suspended && (!card.nextReview || diffDays(card.nextReview) <= 0));
   const currentCard = dueCards[0];
   const completedReadings = studyState.readings.filter((reading) => reading.status === "done").length;
@@ -491,7 +531,7 @@ export function useStudyCompanion() {
           subjectReadings.length > 0
             ? Math.round((subjectReadings.reduce((sum, reading) => sum + Number(reading.confidence || 0), 0) / subjectReadings.length) * 10) / 10
             : 0;
-        const due = subjectReadings.filter((reading) => reading.nextReview && diffDays(reading.nextReview) <= 0).length;
+        const due = subjectReadings.filter((reading) => isReadingReviewPending(reading)).length;
         return {
           subject,
           total: subjectReadings.length,
@@ -510,7 +550,7 @@ export function useStudyCompanion() {
   );
 
   const todayPlan = useMemo(() => {
-    const due = dueReadingReviews.slice(0, 3);
+    const due = dueReadingReviews.slice(0, 4);
     const current = currentWeekReadings.filter((reading) => reading.status !== "done").slice(0, 2);
     return { due, current };
   }, [currentWeekReadings, dueReadingReviews]);
@@ -560,12 +600,16 @@ export function useStudyCompanion() {
   }, [studyState.mocks, studyState.readings]);
 
   const dueTomorrowReadings = useMemo(
-    () => studyState.readings.filter((reading) => reading.nextReview && diffDays(reading.nextReview) === 1),
+    () => studyState.readings.filter((reading) => !isReadingReviewPending(reading) && reading.nextReview && diffDays(reading.nextReview) === 1),
     [studyState.readings],
   );
 
   const overdueReadings = useMemo(
-    () => studyState.readings.filter((reading) => reading.nextReview && diffDays(reading.nextReview) < 0),
+    () =>
+      studyState.readings.filter((reading) => {
+        const dueDate = getPendingReviewDate(reading);
+        return dueDate && diffDays(dueDate) < 0;
+      }),
     [studyState.readings],
   );
 
@@ -606,6 +650,8 @@ export function useStudyCompanion() {
           : nextStatus === "not-started"
             ? ""
             : reading.nextReview,
+      pendingReview: nextStatus === "not-started" ? false : reading.pendingReview,
+      pendingReviewDate: nextStatus === "not-started" ? "" : reading.pendingReviewDate,
     });
   }
 
@@ -616,6 +662,8 @@ export function useStudyCompanion() {
       status: reading.status === "done" ? "done" : "in-progress",
       lastReviewed: date,
       nextReview: reading.confidence ? nextReviewFromScore(reading.confidence, date) : reading.nextReview,
+      pendingReview: reading.pendingReview,
+      pendingReviewDate: reading.pendingReviewDate,
     });
   }
 
@@ -626,6 +674,8 @@ export function useStudyCompanion() {
       status: reading.status === "not-started" ? "in-progress" : reading.status,
       lastReviewed: date,
       nextReview: reading.confidence ? nextReviewFromScore(reading.confidence, date) : reading.nextReview,
+      pendingReview: isReadingReviewPending(reading),
+      pendingReviewDate: getPendingReviewDate(reading),
     });
   }
 
@@ -638,6 +688,34 @@ export function useStudyCompanion() {
       lastReviewed: baseDate,
       nextReview: nextReviewFromScore(score, baseDate),
       reviewHistory: [...(reading.reviewHistory || []), { date: baseDate, score }],
+      pendingReview: isReadingReviewPending(reading),
+      pendingReviewDate: getPendingReviewDate(reading),
+    });
+  }
+
+  function markReviewUpdated(readingId: string, date = todayISO()) {
+    const reading = readingMap[readingId];
+    if (!reading) return;
+    const confidence = Number(reading.confidence || 6);
+    updateReading(readingId, {
+      status: reading.status === "not-started" ? "in-progress" : reading.status,
+      lastReviewed: date,
+      nextReview: nextReviewFromScore(confidence, date),
+      pendingReview: false,
+      pendingReviewDate: "",
+      reviewHistory: [...(reading.reviewHistory || []), { date, score: confidence }],
+    });
+  }
+
+  function snoozeReview(readingId: string, days = 1) {
+    const reading = readingMap[readingId];
+    if (!reading) return;
+    const baseDate = getPendingReviewDate(reading) || reading.nextReview || todayISO();
+    const nextDueDate = addDays(baseDate, days);
+    updateReading(readingId, {
+      nextReview: nextDueDate,
+      pendingReview: false,
+      pendingReviewDate: "",
     });
   }
 
@@ -726,6 +804,8 @@ export function useStudyCompanion() {
             notes: newSession.notes.trim() || item.notes,
             questionProgress: nextQuestionProgress,
             reviewHistory: [...(item.reviewHistory || []), { date: entry.date, score: confidence }],
+            pendingReview: false,
+            pendingReviewDate: "",
           }
         : item,
     );
@@ -749,6 +829,8 @@ export function useStudyCompanion() {
       status: "done",
       lastReviewed: todayISO(),
       nextReview: nextReviewFromScore(Number(reading.confidence || 6), todayISO()),
+      pendingReview: false,
+      pendingReviewDate: "",
       chapterSummary:
         reading.chapterSummary ||
         `Accuracy ${summary.accuracy}% · Total questions ${summary.totalQuestions} · Weakest area: ${summary.weakestArea}.`,
@@ -766,6 +848,8 @@ export function useStudyCompanion() {
             confidence: 0,
             lastReviewed: "",
             nextReview: "",
+            pendingReview: false,
+            pendingReviewDate: "",
             accuracy: null,
             questionsSolved: 0,
             questionProgress: emptyQuestionProgress(),
@@ -784,6 +868,8 @@ export function useStudyCompanion() {
       confidence: 0,
       lastReviewed: "",
       nextReview: "",
+      pendingReview: false,
+      pendingReviewDate: "",
       accuracy: null,
       questionsSolved: 0,
       questionProgress: emptyQuestionProgress(),
@@ -1527,6 +1613,7 @@ export function useStudyCompanion() {
     planEndDate,
     selectedReadingQuestionSummary,
     recoveryAreas,
+    dueTodayReadings,
     dueTomorrowReadings,
     overdueReadings,
     weekProgress,
@@ -1542,6 +1629,8 @@ export function useStudyCompanion() {
     updateReading,
     cycleReadingStatus,
     markReadingStudied,
+    markReviewUpdated,
+    snoozeReview,
     setReadingStudyDate,
     setReadingConfidence,
     handleReadingConfidence,
