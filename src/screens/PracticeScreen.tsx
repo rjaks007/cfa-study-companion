@@ -111,6 +111,9 @@ export function PracticeScreen({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showUploads, setShowUploads] = useState(false);
   const [showCoverageTopics, setShowCoverageTopics] = useState(false);
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false);
+  const [showChapterPicker, setShowChapterPicker] = useState(false);
+  const [showSetOptions, setShowSetOptions] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -190,8 +193,6 @@ export function PracticeScreen({
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
   const chapterCoverage = useMemo(() => buildTopicCoverage(activeUpload || undefined, selectedChapter), [activeUpload, selectedChapter]);
   const activeReading = readings.find((reading) => reading.subject === selectedSubject && reading.title === selectedChapter) || null;
-  const confidencePercent = activeReading ? activeReading.confidence * 10 : 0;
-  const confidenceGap = activeReading && generatedStats.answered ? confidencePercent - generatedStats.accuracy : 0;
   const wrongGeneratedQuestions = activeUpload?.generatedSet
     ? activeUpload.generatedSet.questions.filter((question) => {
         const selected = activeUpload.generatedAnswers[question.id];
@@ -435,32 +436,76 @@ export function PracticeScreen({
           <Panel title="Generate practice set" icon="create-outline">
             {parsedSubjects.length ? (
               <>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
-                  {parsedSubjects.map((upload) => (
-                    <Pressable
-                      key={upload.subject}
-                      style={[styles.subjectChip, selectedSubject === upload.subject && styles.subjectChipActive]}
-                      onPress={() => setSelectedSubject(upload.subject)}
-                    >
-                      <Text style={[styles.subjectChipText, selectedSubject === upload.subject && styles.subjectChipTextActive]}>{upload.subject}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
+                <Text style={styles.sectionLabel}>Subject</Text>
+                <Pressable style={styles.pickerHeader} onPress={() => setShowSubjectPicker((current) => !current)}>
+                  <Text style={styles.subjectPickerHeaderText} numberOfLines={1}>
+                    {selectedSubject || "Select a subject"}
+                  </Text>
+                  <Text style={styles.pickerChevron}>{showSubjectPicker ? "▴" : "▾"}</Text>
+                </Pressable>
+                {showSubjectPicker ? (
+                  <View style={styles.chapterList}>
+                    {parsedSubjects.map((upload) => {
+                      const selected = selectedSubject === upload.subject;
+                      return (
+                        <Pressable
+                          key={upload.subject}
+                          style={[styles.chapterListRow, selected && styles.chapterListRowActive]}
+                          onPress={() => {
+                            setSelectedSubject(upload.subject);
+                            setShowSubjectPicker(false);
+                          }}
+                        >
+                          <Text style={[styles.chapterListTitle, selected && styles.chapterListTitleActive]} numberOfLines={1}>
+                            {upload.subject}
+                          </Text>
+                          <Badge text={`${upload.parsedChapters.length} ch`} tone="neutral" />
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
                 {activeUpload ? (
                   <>
                     <Text style={styles.sectionLabel}>Chapter</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectChipRow} keyboardShouldPersistTaps="handled">
-                      {activeUpload.parsedChapters.map((chapter) => (
-                        <Pressable
-                          key={chapter.id}
-                          style={[styles.chapterChip, selectedChapter === chapter.readingTitle && styles.chapterChipActive]}
-                          onPress={() => setSelectedChapter(chapter.readingTitle)}
-                        >
-                          <Text style={[styles.chapterChipText, selectedChapter === chapter.readingTitle && styles.chapterChipTextActive]}>{chapter.readingTitle}</Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
+                    <Pressable style={styles.pickerHeader} onPress={() => setShowChapterPicker((current) => !current)}>
+                      <Text style={styles.pickerHeaderText} numberOfLines={1}>
+                        {selectedChapter
+                          ? `${activeUpload.parsedChapters.findIndex((chapter) => chapter.readingTitle === selectedChapter) + 1}. ${selectedChapter}`
+                          : "Select a chapter"}
+                      </Text>
+                      <Text style={styles.pickerChevron}>{showChapterPicker ? "▴" : "▾"}</Text>
+                    </Pressable>
+                    {showChapterPicker ? (
+                      <View style={styles.chapterList}>
+                        {activeUpload.parsedChapters.map((chapter, index) => {
+                          const coverage = buildTopicCoverage(activeUpload, chapter.readingTitle);
+                          const selected = selectedChapter === chapter.readingTitle;
+                          return (
+                            <Pressable
+                              key={chapter.id}
+                              style={[styles.chapterListRow, selected && styles.chapterListRowActive]}
+                              onPress={() => {
+                                setSelectedChapter(chapter.readingTitle);
+                                setShowChapterPicker(false);
+                              }}
+                            >
+                              <Text style={styles.chapterListNum}>{index + 1}</Text>
+                              <Text style={[styles.chapterListTitle, selected && styles.chapterListTitleActive]} numberOfLines={2}>
+                                {chapter.readingTitle}
+                              </Text>
+                              {coverage.total ? (
+                                <Badge
+                                  text={`${coverage.percent}%`}
+                                  tone={coverage.percent >= 80 ? "success" : coverage.percent >= 40 ? "accent" : "neutral"}
+                                />
+                              ) : null}
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : null}
 
                     {activeParsedChapter && chapterCoverage.total ? (
                       <View style={styles.summaryCard}>
@@ -504,53 +549,45 @@ export function PracticeScreen({
                       </View>
                     ) : null}
 
-                    <View style={styles.summaryCard}>
-                      <Text style={styles.cardTitle}>Solved so far</Text>
-                      {chapterHistory.length ? (
-                        <View style={styles.levelSummaryWrap}>
-                          {historyByDifficulty.map((item) => (
-                            <View key={item.difficulty} style={styles.levelSummaryCard}>
-                              <Text style={styles.levelSummaryTitle}>{normalizeDifficultyLabel(item.difficulty)}</Text>
-                              <Text style={styles.metaText}>{item.attempted} solved</Text>
-                              <Text style={styles.metaText}>
-                                {item.correct} correct · {item.wrong} wrong
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      ) : (
-                        <Text style={styles.metaText}>No saved practice history for this chapter yet.</Text>
-                      )}
-                    </View>
-
                     <View style={styles.configCard}>
-                      <Text style={styles.sectionLabel}>How many questions?</Text>
-                      <TextInput
-                        value={questionCount}
-                        onChangeText={setQuestionCount}
-                        style={uiStyles.input}
-                        keyboardType="numeric"
-                        placeholder="10"
-                        placeholderTextColor={colors.inkSoft}
-                      />
-                      <Text style={styles.sectionLabel}>Difficulty</Text>
-                      <View style={styles.inlineRow}>
-                        {(["1", "2"] as PracticeDifficulty[]).map((level) => (
-                          <Pressable key={level} style={[styles.levelChip, difficulty === level && styles.levelChipActive]} onPress={() => setDifficulty(level)}>
-                            <Text style={[styles.levelChipText, difficulty === level && styles.levelChipTextActive]}>{normalizeDifficultyLabel(level)}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <Text style={styles.sectionLabel}>Mode</Text>
-                      <View style={styles.inlineRow}>
-                        {(["practice", "test"] as const).map((mode) => (
-                          <Pressable key={mode} style={[styles.levelChip, practiceMode === mode && styles.levelChipActive]} onPress={() => setPracticeMode(mode)}>
-                            <Text style={[styles.levelChipText, practiceMode === mode && styles.levelChipTextActive]}>
-                              {mode === "practice" ? "Practice · instant feedback" : "Test · score at the end"}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
+                      <Pressable style={styles.advancedHeader} onPress={() => setShowSetOptions((current) => !current)}>
+                        <Text style={styles.cardTitle}>Options</Text>
+                        <Badge
+                          text={`${questionCount || "10"} Q · ${normalizeDifficultyLabel(difficulty)} · ${practiceMode === "test" ? "Test" : "Practice"}`}
+                          tone="accent"
+                        />
+                      </Pressable>
+                      {showSetOptions ? (
+                        <>
+                          <Text style={styles.sectionLabel}>How many questions?</Text>
+                          <TextInput
+                            value={questionCount}
+                            onChangeText={setQuestionCount}
+                            style={uiStyles.input}
+                            keyboardType="numeric"
+                            placeholder="10"
+                            placeholderTextColor={colors.inkSoft}
+                          />
+                          <Text style={styles.sectionLabel}>Difficulty</Text>
+                          <View style={styles.inlineRow}>
+                            {(["1", "2"] as PracticeDifficulty[]).map((level) => (
+                              <Pressable key={level} style={[styles.levelChip, difficulty === level && styles.levelChipActive]} onPress={() => setDifficulty(level)}>
+                                <Text style={[styles.levelChipText, difficulty === level && styles.levelChipTextActive]}>{normalizeDifficultyLabel(level)}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                          <Text style={styles.sectionLabel}>Mode</Text>
+                          <View style={styles.inlineRow}>
+                            {(["practice", "test"] as const).map((mode) => (
+                              <Pressable key={mode} style={[styles.levelChip, practiceMode === mode && styles.levelChipActive]} onPress={() => setPracticeMode(mode)}>
+                                <Text style={[styles.levelChipText, practiceMode === mode && styles.levelChipTextActive]}>
+                                  {mode === "practice" ? "Practice · instant feedback" : "Test · score at the end"}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </>
+                      ) : null}
                     </View>
 
                     <ActionButton label={generating ? "Generating..." : "Create practice set"} icon="flash-outline" onPress={() => void handleGeneratePractice()} />
@@ -639,25 +676,6 @@ export function PracticeScreen({
                     <ActionButton label={analyzing ? "Building review..." : "Analyze my weak areas"} icon="analytics-outline" onPress={() => void handleAnalyzePractice()} compact />
                   </View>
                 </View>
-
-                {activeReading && generatedStats.answered && revealed ? (
-                  <View style={styles.summaryCard}>
-                    <Text style={styles.cardTitle}>Confidence calibration</Text>
-                    <Text style={styles.metaText}>
-                      You rated this chapter at {activeReading.confidence}/10, while your current set score is {generatedStats.accuracy}%.
-                    </Text>
-                    <Badge
-                      text={
-                        Math.abs(confidenceGap) <= 10
-                          ? "Confidence and score are aligned"
-                          : confidenceGap > 10
-                            ? "You may be overconfident here"
-                            : "You may know more than your confidence suggests"
-                      }
-                      tone={Math.abs(confidenceGap) <= 10 ? "success" : confidenceGap > 10 ? "warning" : "accent"}
-                    />
-                  </View>
-                ) : null}
 
                 {activeUpload.generatedSet.questions.map((question, index) => {
                   const selected = activeUpload.generatedAnswers[question.id];
@@ -1179,6 +1197,69 @@ const styles = StyleSheet.create({
   },
   chapterChipTextActive: {
     color: colors.surface,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  pickerHeaderText: {
+    color: colors.ink,
+    fontWeight: "700",
+    fontSize: 14,
+    flex: 1,
+  },
+  subjectPickerHeaderText: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 18,
+    flex: 1,
+  },
+  pickerChevron: {
+    color: colors.inkSoft,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  chapterList: {
+    gap: 8,
+  },
+  chapterListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  chapterListRowActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  chapterListNum: {
+    color: colors.inkSoft,
+    fontWeight: "800",
+    fontSize: 13,
+    minWidth: 20,
+  },
+  chapterListTitle: {
+    color: colors.ink,
+    fontWeight: "600",
+    fontSize: 13,
+    flex: 1,
+  },
+  chapterListTitleActive: {
+    color: colors.primary,
+    fontWeight: "800",
   },
   configCard: {
     backgroundColor: colors.surfaceMuted,

@@ -32,49 +32,8 @@ export function ProgressScreen({
     return map;
   }, [uploads]);
 
-  // "What to study next": confirmed weak topics first, then untested, across all subjects.
-  const studyNext = useMemo(() => {
-    const weak: Array<{ subject: Subject; topic: string }> = [];
-    const untested: Array<{ subject: Subject; topic: string }> = [];
-    uploads.forEach((upload) => {
-      upload.parsedChapters.forEach((chapter) => {
-        const coverage = buildTopicCoverage(upload, chapter.readingTitle);
-        coverage.weakTopics.forEach((topic) => weak.push({ subject: upload.subject, topic }));
-        coverage.untestedTopics.forEach((topic) => untested.push({ subject: upload.subject, topic }));
-      });
-    });
-    return { weak: weak.slice(0, 6), untested: untested.slice(0, 6) };
-  }, [uploads]);
-
-  const hasStudyNext = studyNext.weak.length > 0 || studyNext.untested.length > 0;
-
   return (
     <>
-      {hasStudyNext ? (
-        <Panel title="What to study next" icon="trending-up-outline">
-          {studyNext.weak.length ? (
-            <>
-              <Text style={styles.copy}>Topics you have missed — drill these first.</Text>
-              <View style={styles.chipWrap}>
-                {studyNext.weak.map((item) => (
-                  <Badge key={`w-${item.subject}-${item.topic}`} text={item.topic} tone="warning" />
-                ))}
-              </View>
-            </>
-          ) : null}
-          {studyNext.untested.length ? (
-            <>
-              <Text style={styles.copy}>Not tested yet — cover these to fill gaps.</Text>
-              <View style={styles.chipWrap}>
-                {studyNext.untested.map((item) => (
-                  <Badge key={`u-${item.subject}-${item.topic}`} text={item.topic} tone="neutral" />
-                ))}
-              </View>
-            </>
-          ) : null}
-        </Panel>
-      ) : null}
-
       <Panel title="Progress" icon="bar-chart-outline">
         <Text style={styles.copy}>Tap a subject to open or hide its chapters. Tap any chapter card to jump into Weekly Plan with that reading opened and highlighted in its own week.</Text>
         {subjectStats.map((stat) => {
@@ -91,7 +50,7 @@ export function ProgressScreen({
                   </Text>
                 </View>
                 <View style={styles.headerBadges}>
-                  <Badge text={`${stat.progress}%`} tone={stat.progress >= 80 ? "success" : stat.progress >= 40 ? "accent" : "neutral"} />
+                  <Badge text={`Done ${stat.progress}%`} tone={stat.progress >= 80 ? "success" : stat.progress >= 40 ? "accent" : "neutral"} />
                   <Badge text={isExpanded ? "Hide" : "Open"} tone="accent" />
                 </View>
               </Pressable>
@@ -125,7 +84,7 @@ export function ProgressScreen({
                           if (!coverage || !coverage.total) return null;
                           return (
                             <Badge
-                              text={`Cov ${coverage.percent}%`}
+                              text={`Mastery ${coverage.percent}%`}
                               tone={coverage.percent >= 80 ? "success" : coverage.percent >= 40 ? "accent" : "neutral"}
                             />
                           );
@@ -242,6 +201,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  studyNextRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  studyNextTopic: {
+    color: colors.ink,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  studyNextMeta: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    marginTop: 3,
   },
   flex: {
     flex: 1,

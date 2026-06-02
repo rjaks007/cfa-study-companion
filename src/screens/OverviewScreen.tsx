@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
+import { StudyNextItem } from "../utils/coverage";
 import { formatLongDate, formatShortDate } from "../utils/study";
 
 type ReadingItem = {
@@ -30,6 +31,7 @@ export function OverviewScreen({
   onOpenStudyReading,
   onMarkReviewUpdated,
   onStartReviewQuiz,
+  studyNext,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTodayReadings: ReadingItem[];
@@ -42,9 +44,15 @@ export function OverviewScreen({
   onOpenWeekly: () => void;
   onOpenStudyReading: (reading: ReadingItem) => void;
   onMarkReviewUpdated: (readingId: string) => void;
-  onStartReviewQuiz: (reading: ReadingItem) => void;
+  onStartReviewQuiz: (reading: { subject: string; title: string }) => void;
+  studyNext: StudyNextItem[];
 }) {
+  const [studyNextOpen, setStudyNextOpen] = useState(false);
   const nextPriority = overdueReadings[0] || dueTodayReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
+  const reviewsDue = [
+    ...overdueReadings.map((reading) => ({ reading, overdue: true })),
+    ...dueTodayReadings.map((reading) => ({ reading, overdue: false })),
+  ];
 
   return (
     <>
@@ -85,6 +93,63 @@ export function OverviewScreen({
         </View>
       </Panel>
 
+      <Panel title="Reviews due" icon="notifications-outline">
+        {reviewsDue.length ? (
+          reviewsDue.slice(0, 8).map(({ reading, overdue }) => (
+            <View key={reading.id} style={styles.reviewTaskCard}>
+              <Pressable style={styles.flex} onPress={() => onOpenStudyReading(reading)}>
+                <Text style={styles.rowTitle}>{reading.subject}</Text>
+                <Text style={styles.rowMeta}>
+                  R{reading.readingNumber} · {reading.title}
+                </Text>
+                <Text style={styles.reviewMeta}>
+                  Cycle {reading.revisionCycle || 1} · Revised {reading.reviewHistory?.length || 0} times · Confidence {reading.confidence || 0}/10
+                </Text>
+              </Pressable>
+              <View style={styles.reviewActionWrap}>
+                <Badge text={overdue ? "Overdue" : "Due today"} tone="danger" />
+                <Pressable style={styles.quizButton} onPress={() => onStartReviewQuiz(reading)}>
+                  <Text style={styles.quizButtonText}>Review quiz</Text>
+                </Pressable>
+                <Pressable style={styles.completeButton} onPress={() => onMarkReviewUpdated(reading.id)}>
+                  <Text style={styles.completeButtonText}>Mark revised</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))
+        ) : (
+          <EmptyState text="No reviews due. You're caught up." />
+        )}
+      </Panel>
+
+      {studyNext.length ? (
+        <Panel title="What to study next" icon="trending-up-outline">
+          <Pressable style={styles.collapseHeader} onPress={() => setStudyNextOpen((value) => !value)}>
+            <Text style={styles.metaText}>
+              {studyNext.length} high-priority topic{studyNext.length > 1 ? "s" : ""}
+            </Text>
+            <Badge text={studyNextOpen ? "Hide" : "Show"} tone="accent" />
+          </Pressable>
+          {studyNextOpen
+            ? studyNext.map((item) => (
+                <Pressable
+                  key={`${item.reason}-${item.subject}-${item.chapterTitle}-${item.topic}`}
+                  style={styles.studyNextRow}
+                  onPress={() => onStartReviewQuiz({ subject: item.subject, title: item.chapterTitle })}
+                >
+                  <View style={styles.flex}>
+                    <Text style={styles.rowTitle}>{item.topic}</Text>
+                    <Text style={styles.rowMeta}>
+                      {item.subject} · {item.chapterTitle}
+                    </Text>
+                  </View>
+                  <Badge text={item.reason === "weak" ? "Missed" : "Not tested"} tone={item.reason === "weak" ? "warning" : "neutral"} />
+                </Pressable>
+              ))
+            : null}
+        </Panel>
+      ) : null}
+
       <Panel title="Study now" icon="book-outline">
         {todayPlan.current.length ? (
           todayPlan.current.map((reading) => (
@@ -100,75 +165,6 @@ export function OverviewScreen({
           ))
         ) : (
           <EmptyState text="You have finished the current week plan." />
-        )}
-      </Panel>
-
-      <Panel title="Reviews" icon="notifications-outline">
-        <Text style={styles.sectionTitle}>Due now</Text>
-        {dueTodayReadings.length ? (
-          dueTodayReadings.slice(0, 6).map((reading) => (
-            <View key={reading.id} style={styles.reviewTaskCard}>
-              <Pressable style={styles.flex} onPress={() => onOpenStudyReading(reading)}>
-                <Text style={styles.rowTitle}>{reading.subject}</Text>
-                <Text style={styles.rowMeta}>
-                  R{reading.readingNumber} · {reading.title}
-                </Text>
-                <Text style={styles.reviewMeta}>
-                  Cycle {reading.revisionCycle || 1} · Revised {reading.reviewHistory?.length || 0} times · Confidence {reading.confidence || 0}/10
-                </Text>
-              </Pressable>
-              <View style={styles.reviewActionWrap}>
-                <Badge text="Due today" tone="danger" />
-                <Pressable style={styles.quizButton} onPress={() => onStartReviewQuiz(reading)}>
-                  <Text style={styles.quizButtonText}>Review quiz</Text>
-                </Pressable>
-                <Pressable style={styles.completeButton} onPress={() => onMarkReviewUpdated(reading.id)}>
-                  <Text style={styles.completeButtonText}>Mark revised</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))
-        ) : (
-          <EmptyState text="No reviews are due right now." />
-        )}
-
-        <Text style={styles.sectionTitle}>Due tomorrow</Text>
-        {dueTomorrowReadings.length ? (
-          dueTomorrowReadings.slice(0, 4).map((reading) => (
-            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
-              <View style={styles.flex}>
-                <Text style={styles.rowTitle}>{reading.subject}</Text>
-                <Text style={styles.rowMeta}>
-                  R{reading.readingNumber} · {reading.title}
-                </Text>
-              </View>
-              <Badge text="Tomorrow" tone="warning" />
-            </Pressable>
-          ))
-        ) : (
-          <EmptyState text="No reviews are due tomorrow." />
-        )}
-
-        <Text style={styles.sectionTitle}>Overdue</Text>
-        {overdueReadings.length ? (
-          overdueReadings.slice(0, 4).map((reading) => (
-            <View key={reading.id} style={styles.reviewTaskCard}>
-              <Pressable style={styles.flex} onPress={() => onOpenStudyReading(reading)}>
-                <Text style={styles.rowTitle}>{reading.subject}</Text>
-                <Text style={styles.rowMeta}>
-                  R{reading.readingNumber} · {reading.title}
-                </Text>
-              </Pressable>
-              <View style={styles.reviewActionWrap}>
-                <Badge text="Overdue" tone="danger" />
-                <Pressable style={styles.quizButton} onPress={() => onStartReviewQuiz(reading)}>
-                  <Text style={styles.quizButtonText}>Review quiz</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))
-        ) : (
-          <EmptyState text="No overdue reviews right now." />
         )}
       </Panel>
 
@@ -344,5 +340,20 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontWeight: "800",
     fontSize: 12,
+  },
+  collapseHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  studyNextRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
 });

@@ -1,4 +1,25 @@
-import { UploadRecord } from "../types";
+import { Subject, UploadRecord } from "../types";
+
+// Approximate CFA Level I exam weights — used to rank what's most worth studying.
+export const SUBJECT_WEIGHT: Record<Subject, number> = {
+  Ethics: 15,
+  "Financial Statement Analysis": 13,
+  "Equity Investments": 11,
+  "Fixed Income": 11,
+  "Portfolio Management": 9,
+  "Corporate Finance": 7,
+  "Alternative Investments": 7,
+  "Quantitative Methods": 6,
+  Economics: 6,
+  Derivatives: 5,
+};
+
+export interface StudyNextItem {
+  subject: Subject;
+  chapterTitle: string;
+  topic: string;
+  reason: "weak" | "untested";
+}
 
 export type TopicStatusValue = "solid" | "weak" | "untested";
 
@@ -75,4 +96,32 @@ export function buildTopicCoverage(upload: UploadRecord | undefined, chapterTitl
     weakTopics: statuses.filter((entry) => entry.status === "weak").map((entry) => entry.topic),
     untestedTopics: statuses.filter((entry) => entry.status === "untested").map((entry) => entry.topic),
   };
+}
+
+// A focused, ranked "what to study next" list across all subjects:
+// confirmed weak topics first, then untested topics only in chapters already started,
+// ranked by exam weight, capped to a short list.
+export function buildStudyNext(uploads: UploadRecord[], limit = 5): StudyNextItem[] {
+  const weak: Array<StudyNextItem & { weight: number }> = [];
+  const untested: Array<StudyNextItem & { weight: number }> = [];
+
+  uploads.forEach((upload) => {
+    const weight = SUBJECT_WEIGHT[upload.subject] ?? 5;
+    upload.parsedChapters.forEach((chapter) => {
+      const coverage = buildTopicCoverage(upload, chapter.readingTitle);
+      coverage.weakTopics.forEach((topic) =>
+        weak.push({ subject: upload.subject, chapterTitle: chapter.readingTitle, topic, reason: "weak", weight }),
+      );
+      const engaged = (upload.coverageLog || []).some((attempt) => attempt.chapterTitle === chapter.readingTitle);
+      if (engaged) {
+        coverage.untestedTopics.forEach((topic) =>
+          untested.push({ subject: upload.subject, chapterTitle: chapter.readingTitle, topic, reason: "untested", weight }),
+        );
+      }
+    });
+  });
+
+  weak.sort((a, b) => b.weight - a.weight);
+  untested.sort((a, b) => b.weight - a.weight);
+  return [...weak, ...untested].slice(0, limit).map(({ weight: _weight, ...item }) => item);
 }

@@ -11,6 +11,7 @@ import { ProgressScreen } from "./src/screens/ProgressScreen";
 import { WeeklyPlanScreen } from "./src/screens/WeeklyPlanScreen";
 import { colors } from "./src/theme";
 import { AppTab, Reading, Subject } from "./src/types";
+import { buildStudyNext } from "./src/utils/coverage";
 import { formatInputDate, parseInputDate } from "./src/utils/study";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
   const scrollRef = useRef<any>(null);
   const study = useStudyCompanion();
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
+  const studyNext = useMemo(() => buildStudyNext(study.studyState.uploads), [study.studyState.uploads]);
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
@@ -191,6 +193,7 @@ export default function App() {
                 onOpenStudyReading={openWeeklyFromOverview}
                 onMarkReviewUpdated={study.markReviewUpdated}
                 onStartReviewQuiz={startReviewQuiz}
+                studyNext={studyNext}
               />
             ) : null}
             {activeTab === "overview" ? (
