@@ -624,9 +624,13 @@ export function PracticeScreen({
 
                   {practiceMode === "test" && !submitted ? (
                     <ActionButton
-                      label={`Submit test (${generatedStats.answered}/${generatedStats.total} answered)`}
+                      label={`Submit ${reviewContext ? "review" : "test"} (${generatedStats.answered}/${generatedStats.total} answered)`}
                       icon="checkmark-done-outline"
-                      onPress={() => setSubmitted(true)}
+                      onPress={() => {
+                        setSubmitted(true);
+                        // A review quiz settles its review automatically on submit (score-based).
+                        if (reviewContext) finishReview("good");
+                      }}
                     />
                   ) : null}
 
@@ -649,25 +653,16 @@ export function PracticeScreen({
 
                   {reviewContext && submitted ? (
                     <View style={styles.summaryCard}>
-                      {reviewScheduled ? (
-                        <Text style={styles.feedbackTitle}>✓ Next review scheduled from this score.</Text>
-                      ) : (
-                        <>
-                          <Text style={styles.cardTitle}>Schedule next review</Text>
-                          <Text style={styles.metaText}>How did that feel? This sets when this chapter comes back.</Text>
-                          <View style={styles.inlineRow}>
-                            <Pressable style={styles.levelChip} onPress={() => finishReview("hard")}>
-                              <Text style={styles.levelChipText}>Tough · sooner</Text>
-                            </Pressable>
-                            <Pressable style={styles.levelChip} onPress={() => finishReview("good")}>
-                              <Text style={styles.levelChipText}>OK</Text>
-                            </Pressable>
-                            <Pressable style={styles.levelChip} onPress={() => finishReview("easy")}>
-                              <Text style={styles.levelChipText}>Easy · later</Text>
-                            </Pressable>
-                          </View>
-                        </>
-                      )}
+                      <Text style={styles.feedbackTitle}>✓ Review done — next date set from your score.</Text>
+                      <Text style={styles.metaText}>Felt different? Adjust when this chapter comes back:</Text>
+                      <View style={styles.inlineRow}>
+                        <Pressable style={styles.levelChip} onPress={() => finishReview("hard")}>
+                          <Text style={styles.levelChipText}>Tougher · sooner</Text>
+                        </Pressable>
+                        <Pressable style={styles.levelChip} onPress={() => finishReview("easy")}>
+                          <Text style={styles.levelChipText}>Easier · later</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   ) : null}
 

@@ -855,6 +855,13 @@ export function useStudyCompanion() {
     const confidence = Math.max(1, Math.min(10, scoreConfidence + nudgeOffset));
     const date = todayISO();
 
+    // Idempotent for the same day: submitting settles the review, and a later
+    // Tougher/Easier adjustment REPLACES that day's entry instead of double-counting.
+    const settledToday = reading.lastReviewed === date && !reading.pendingReview;
+    const history = reading.reviewHistory || [];
+    const reviewHistory = settledToday && history.length ? [...history.slice(0, -1), { date, score: confidence }] : [...history, { date, score: confidence }];
+    const revisionCycle = settledToday ? reading.revisionCycle || 1 : (reading.revisionCycle || 1) + 1;
+
     updateReading(reading.id, {
       status: reading.status === "not-started" ? "in-progress" : reading.status,
       confidence,
@@ -862,8 +869,8 @@ export function useStudyCompanion() {
       nextReview: nextReviewFromScore(confidence, date),
       pendingReview: false,
       pendingReviewDate: "",
-      revisionCycle: (reading.revisionCycle || 1) + 1,
-      reviewHistory: [...(reading.reviewHistory || []), { date, score: confidence }],
+      revisionCycle,
+      reviewHistory,
     });
   }
 
