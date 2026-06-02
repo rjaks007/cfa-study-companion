@@ -29,6 +29,7 @@ export function OverviewScreen({
   onOpenWeekly,
   onOpenStudyReading,
   onMarkReviewUpdated,
+  onStartReviewQuiz,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTodayReadings: ReadingItem[];
@@ -41,21 +42,12 @@ export function OverviewScreen({
   onOpenWeekly: () => void;
   onOpenStudyReading: (reading: ReadingItem) => void;
   onMarkReviewUpdated: (readingId: string) => void;
+  onStartReviewQuiz: (reading: ReadingItem) => void;
 }) {
   const nextPriority = overdueReadings[0] || dueTodayReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
 
   return (
     <>
-      <View style={styles.planEndCard}>
-        <View style={styles.planEndHeader}>
-          <View style={styles.planEndIconWrap}>
-            <Ionicons name="calendar-clear-outline" size={15} color={colors.primary} />
-          </View>
-          <Text style={styles.planEndLabel}>Plan ends</Text>
-        </View>
-        <Text style={styles.planEndValue}>{formatLongDate(planEndDate)}</Text>
-      </View>
-
       <Panel title="Today" icon="sunny-outline">
         <View style={styles.summaryCard}>
           <Text style={styles.sectionTitle}>This week completion</Text>
@@ -127,6 +119,9 @@ export function OverviewScreen({
               </Pressable>
               <View style={styles.reviewActionWrap}>
                 <Badge text="Due today" tone="danger" />
+                <Pressable style={styles.quizButton} onPress={() => onStartReviewQuiz(reading)}>
+                  <Text style={styles.quizButtonText}>Review quiz</Text>
+                </Pressable>
                 <Pressable style={styles.completeButton} onPress={() => onMarkReviewUpdated(reading.id)}>
                   <Text style={styles.completeButtonText}>Mark revised</Text>
                 </Pressable>
@@ -157,20 +152,35 @@ export function OverviewScreen({
         <Text style={styles.sectionTitle}>Overdue</Text>
         {overdueReadings.length ? (
           overdueReadings.slice(0, 4).map((reading) => (
-            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
-              <View style={styles.flex}>
+            <View key={reading.id} style={styles.reviewTaskCard}>
+              <Pressable style={styles.flex} onPress={() => onOpenStudyReading(reading)}>
                 <Text style={styles.rowTitle}>{reading.subject}</Text>
                 <Text style={styles.rowMeta}>
                   R{reading.readingNumber} · {reading.title}
                 </Text>
+              </Pressable>
+              <View style={styles.reviewActionWrap}>
+                <Badge text="Overdue" tone="danger" />
+                <Pressable style={styles.quizButton} onPress={() => onStartReviewQuiz(reading)}>
+                  <Text style={styles.quizButtonText}>Review quiz</Text>
+                </Pressable>
               </View>
-              <Badge text="Overdue" tone="danger" />
-            </Pressable>
+            </View>
           ))
         ) : (
           <EmptyState text="No overdue reviews right now." />
         )}
       </Panel>
+
+      <View style={styles.planEndCard}>
+        <View style={styles.planEndHeader}>
+          <View style={styles.planEndIconWrap}>
+            <Ionicons name="calendar-clear-outline" size={15} color={colors.primary} />
+          </View>
+          <Text style={styles.planEndLabel}>Plan ends</Text>
+        </View>
+        <Text style={styles.planEndValue}>{formatLongDate(planEndDate)}</Text>
+      </View>
     </>
   );
 }
@@ -312,12 +322,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   completeButton: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  completeButtonText: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  quizButton: {
     backgroundColor: colors.primary,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  completeButtonText: {
+  quizButtonText: {
     color: colors.surface,
     fontWeight: "800",
     fontSize: 12,

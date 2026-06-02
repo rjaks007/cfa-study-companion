@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
-import { buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
+import { assignRoadmapWeeks, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
 import {
   CardDraft,
   ChapterQuestionSummary,
@@ -16,6 +16,7 @@ import {
   PracticeDifficulty,
   PracticeHistoryEntry,
   PracticeQuestion,
+  RoadmapOverride,
   SavedPracticeQuestion,
   SavedPracticeSet,
   SessionDraft,
@@ -96,6 +97,22 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
       };
     })
     .filter(Boolean) as PracticeChapter[];
+}
+
+function normalizeRoadmapOverrides(value: unknown): Record<string, RoadmapOverride> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, override]) => {
+      const alias = typeof (override as RoadmapOverride)?.alias === "string" ? String((override as RoadmapOverride).alias).trim() : "";
+      const hidden = Boolean((override as RoadmapOverride)?.hidden);
+      return [key, { ...(alias ? { alias } : {}), ...(hidden ? { hidden } : {}) }];
+    }),
+  );
+}
+
+function hiddenRoadmapIdSet(overrides: Record<string, RoadmapOverride> | undefined) {
+  return new Set(Object.entries(overrides || {}).filter(([, override]) => Boolean(override.hidden)).map(([readingId]) => readingId));
 }
 
 function normalizeQuestionText(value: string) {
@@ -295,6 +312,19 @@ function normalizeReading(reading: StoredState["readings"][number]) {
   };
 }
 
+function getRoadmapOverride(state: StoredState, readingId: string) {
+  return state.roadmapOverrides?.[readingId] || {};
+}
+
+function getRoadmapReadingTitle(state: StoredState, readingId: string, fallback: string) {
+  const override = getRoadmapOverride(state, readingId);
+  return override.alias || fallback;
+}
+
+function isRoadmapReadingHidden(state: StoredState, readingId: string) {
+  return Boolean(getRoadmapOverride(state, readingId).hidden);
+}
+
 function isReadingReviewPending(reading: StoredState["readings"][number]) {
   if (reading.pendingReview && reading.pendingReviewDate) return true;
   return Boolean(reading.nextReview && diffDays(reading.nextReview) <= 0);
@@ -342,6 +372,7 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
     wrongQuestions: Array.isArray(upload.wrongQuestions)
       ? upload.wrongQuestions.map(normalizeSavedQuestion).filter(Boolean) as SavedPracticeQuestion[]
       : [],
+    coverageLog: Array.isArray(upload.coverageLog) ? upload.coverageLog : [],
   };
 }
 
@@ -351,6 +382,7 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
 
   const readings = value.readings?.length ? value.readings.map(normalizeReading) : base.readings;
   const selectedSubject = value.selectedSubject || base.selectedSubject;
+  const weeklySelectedSubject = value.weeklySelectedSubject || selectedSubject || base.weeklySelectedSubject;
   const selectedReadingId =
     value.selectedReadingId && readings.some((reading) => reading.id === value.selectedReadingId)
       ? value.selectedReadingId
@@ -364,16 +396,20 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
   const sessions = Array.isArray(value.sessions) ? value.sessions : [];
   const cards = Array.isArray(value.cards) && value.cards.length ? value.cards : starterCards();
   const mocks = Array.isArray(value.mocks) && value.mocks.length ? value.mocks : defaultMocks();
+  const roadmapOverrides = normalizeRoadmapOverrides(value.roadmapOverrides);
+  const hiddenIds = hiddenRoadmapIdSet(roadmapOverrides);
 
   return {
     startDate: value.startDate || base.startDate,
     readings,
-    weeks: buildWeeks(readings),
+    weeks: buildWeeks(readings, { includeReading: (reading) => !hiddenIds.has(reading.id) }),
     sessions,
     cards,
     uploads,
+    roadmapOverrides,
     mocks,
     selectedSubject,
+    weeklySelectedSubject,
     selectedReadingId,
     backendBaseUrl: value.backendBaseUrl || base.backendBaseUrl,
     notificationsEnabled: Boolean(value.notificationsEnabled),
@@ -422,13 +458,20 @@ export function useStudyCompanion() {
 
   useEffect(() => {
     if (!isHydrated || !studyState.notificationsEnabled) return;
-    scheduleReviewNotifications(studyState.readings).catch((error) => {
+    const hiddenIds = hiddenRoadmapIdSet(studyState.roadmapOverrides);
+    scheduleReviewNotifications(
+      studyState.readings.map((reading) => ({
+        ...reading,
+        hidden: hiddenIds.has(reading.id),
+      })),
+    ).catch((error) => {
       console.warn("Failed to schedule review reminders", error);
     });
-  }, [isHydrated, studyState.notificationsEnabled, studyState.readings]);
+  }, [isHydrated, studyState.notificationsEnabled, studyState.readings, studyState.roadmapOverrides]);
 
   useEffect(() => {
     if (!isHydrated) return;
+    const hiddenIds = hiddenRoadmapIdSet(studyState.roadmapOverrides);
     const nextReadings = studyState.readings.map((reading) => {
       if (!reading.pendingReview && reading.nextReview && diffDays(reading.nextReview) <= 0) {
         return {
@@ -446,9 +489,9 @@ export function useStudyCompanion() {
     });
 
     if (changed) {
-      setStudyState((current) => ({ ...current, readings: nextReadings, weeks: buildWeeks(nextReadings) }));
+      setStudyState((current) => ({ ...current, readings: nextReadings, weeks: buildWeeks(nextReadings, { includeReading: (reading) => !hiddenIds.has(reading.id) }) }));
     }
-  }, [isHydrated, studyState.readings]);
+  }, [isHydrated, studyState.readings, studyState.roadmapOverrides]);
 
   const readingMap = useMemo(
     () => Object.fromEntries(studyState.readings.map((reading) => [reading.id, reading])),
@@ -491,12 +534,14 @@ export function useStudyCompanion() {
   }, [studyState.startDate]);
 
   const currentWeekObj = studyState.weeks.find((week) => week.week === currentWeek) || studyState.weeks[0];
-  const currentWeekReadings = currentWeekObj.readings.map((id) => readingMap[id]).filter(Boolean);
+  const hiddenIds = hiddenRoadmapIdSet(studyState.roadmapOverrides);
+  const currentWeekReadings = currentWeekObj.readings.map((id) => readingMap[id]).filter(Boolean).filter((reading) => !hiddenIds.has(reading.id));
+  const activeReadings = studyState.readings.filter((reading) => !hiddenIds.has(reading.id));
   const backlogReadings = studyState.readings.filter((reading) => reading.weekAssigned < currentWeek && reading.status !== "done");
-  const dueReadingReviews = studyState.readings.filter((reading) => isReadingReviewPending(reading));
+  const dueReadingReviews = studyState.readings.filter((reading) => isReadingReviewPending(reading) && !hiddenIds.has(reading.id));
   const dueTodayReadings = studyState.readings.filter((reading) => {
     const dueDate = getPendingReviewDate(reading);
-    return dueDate && diffDays(dueDate) === 0;
+    return dueDate && diffDays(dueDate) === 0 && !hiddenIds.has(reading.id);
   });
   const dueCards = studyState.cards.filter((card) => !card.suspended && (!card.nextReview || diffDays(card.nextReview) <= 0));
   const currentCard = dueCards[0];
@@ -573,9 +618,10 @@ export function useStudyCompanion() {
 
   const planEndDate = useMemo(() => {
     const end = new Date(studyState.startDate || todayISO());
-    end.setDate(end.getDate() + 26 * 7 - 1);
+    const lastWeek = activeReadings.reduce((max, reading) => Math.max(max, reading.weekAssigned || 1), 1);
+    end.setDate(end.getDate() + lastWeek * 7 - 1);
     return end.toISOString().slice(0, 10);
-  }, [studyState.startDate]);
+  }, [activeReadings, studyState.startDate]);
 
   const selectedReadingQuestionSummary: ChapterQuestionSummary | null = selectedReading
     ? buildChapterQuestionSummary(selectedReading, studyState.sessions)
@@ -600,17 +646,17 @@ export function useStudyCompanion() {
   }, [studyState.mocks, studyState.readings]);
 
   const dueTomorrowReadings = useMemo(
-    () => studyState.readings.filter((reading) => !isReadingReviewPending(reading) && reading.nextReview && diffDays(reading.nextReview) === 1),
-    [studyState.readings],
+    () => studyState.readings.filter((reading) => !isReadingReviewPending(reading) && reading.nextReview && diffDays(reading.nextReview) === 1 && !hiddenIds.has(reading.id)),
+    [hiddenIds, studyState.readings],
   );
 
   const overdueReadings = useMemo(
     () =>
       studyState.readings.filter((reading) => {
         const dueDate = getPendingReviewDate(reading);
-        return dueDate && diffDays(dueDate) < 0;
+        return dueDate && diffDays(dueDate) < 0 && !hiddenIds.has(reading.id);
       }),
-    [studyState.readings],
+    [hiddenIds, studyState.readings],
   );
 
   const weekProgress = useMemo(() => {
@@ -623,11 +669,84 @@ export function useStudyCompanion() {
     };
   }, [currentWeekReadings]);
 
+  function setRoadmapOverride(readingId: string, patch: Partial<RoadmapOverride>) {
+    setStudyState((current) => {
+      const existing = current.roadmapOverrides?.[readingId] || {};
+      const nextOverride: RoadmapOverride = {
+        ...(typeof patch.alias === "string" ? { alias: patch.alias.trim() } : patch.alias === "" ? { alias: "" } : {}),
+        ...(typeof patch.hidden === "boolean" ? { hidden: patch.hidden } : {}),
+      };
+
+      const merged = {
+        ...existing,
+        ...nextOverride,
+      };
+
+      const cleaned = {
+        ...(merged.alias ? { alias: merged.alias } : {}),
+        ...(merged.hidden ? { hidden: true } : {}),
+      };
+
+      const nextOverrides = { ...(current.roadmapOverrides || {}) };
+      if (!Object.keys(cleaned).length) {
+        delete nextOverrides[readingId];
+      } else {
+        nextOverrides[readingId] = cleaned;
+      }
+
+      const hiddenIds = hiddenRoadmapIdSet(nextOverrides);
+      const nextWeeks = buildWeeks(current.readings, { includeReading: (reading) => !hiddenIds.has(reading.id) });
+
+      return {
+        ...current,
+        roadmapOverrides: nextOverrides,
+        weeks: nextWeeks,
+      };
+    });
+  }
+
+  function renameRoadmapReading(readingId: string, alias: string) {
+    setRoadmapOverride(readingId, { alias });
+  }
+
+  function hideRoadmapReading(readingId: string) {
+    setRoadmapOverride(readingId, { hidden: true });
+  }
+
+  function restoreRoadmapReading(readingId: string) {
+    setStudyState((current) => {
+      const existing = current.roadmapOverrides?.[readingId];
+      if (!existing) return current;
+      const nextOverrides = { ...(current.roadmapOverrides || {}) };
+      const cleaned = {
+        ...(existing.alias ? { alias: existing.alias } : {}),
+      };
+      if (!Object.keys(cleaned).length) {
+        delete nextOverrides[readingId];
+      } else {
+        nextOverrides[readingId] = cleaned;
+      }
+
+      const hiddenIds = hiddenRoadmapIdSet(nextOverrides);
+      const nextWeeks = buildWeeks(current.readings, { includeReading: (reading) => !hiddenIds.has(reading.id) });
+
+      return {
+        ...current,
+        roadmapOverrides: nextOverrides,
+        weeks: nextWeeks,
+      };
+    });
+  }
+
+  function getDisplayReadingTitle(readingId: string, fallback: string) {
+    return getRoadmapReadingTitle(studyState, readingId, fallback);
+  }
+
   function setReadings(nextReadings: StoredState["readings"]) {
     setStudyState((current) => ({
       ...current,
       readings: nextReadings,
-      weeks: buildWeeks(nextReadings),
+      weeks: buildWeeks(nextReadings, { includeReading: (reading) => !hiddenRoadmapIdSet(current.roadmapOverrides).has(reading.id) }),
     }));
   }
 
@@ -719,12 +838,48 @@ export function useStudyCompanion() {
     });
   }
 
+  // Closes the review loop: a finished review quiz turns its score into an updated
+  // confidence, which reschedules the chapter. An optional Hard/Good/Easy nudge lets
+  // the user adjust the next interval if the raw score does not match how it felt.
+  function completeReviewForReading(
+    subject: Subject,
+    chapterTitle: string,
+    accuracyPercent: number,
+    nudge: "hard" | "good" | "easy" = "good",
+  ) {
+    const reading = studyState.readings.find((item) => item.subject === subject && item.title === chapterTitle);
+    if (!reading) return;
+
+    const nudgeOffset = nudge === "hard" ? -1 : nudge === "easy" ? 1 : 0;
+    const scoreConfidence = Math.round(Math.max(0, Math.min(100, accuracyPercent)) / 10);
+    const confidence = Math.max(1, Math.min(10, scoreConfidence + nudgeOffset));
+    const date = todayISO();
+
+    updateReading(reading.id, {
+      status: reading.status === "not-started" ? "in-progress" : reading.status,
+      confidence,
+      lastReviewed: date,
+      nextReview: nextReviewFromScore(confidence, date),
+      pendingReview: false,
+      pendingReviewDate: "",
+      revisionCycle: (reading.revisionCycle || 1) + 1,
+      reviewHistory: [...(reading.reviewHistory || []), { date, score: confidence }],
+    });
+  }
+
   function setSelectedSubject(subject: Subject) {
     const firstReadingId = studyState.readings.find((reading) => reading.subject === subject)?.id || studyState.readings[0].id;
     setStudyState((current) => ({
       ...current,
       selectedSubject: subject,
       selectedReadingId: firstReadingId,
+    }));
+  }
+
+  function setWeeklySelectedSubject(subject: Subject) {
+    setStudyState((current) => ({
+      ...current,
+      weeklySelectedSubject: subject,
     }));
   }
 
@@ -814,7 +969,7 @@ export function useStudyCompanion() {
       ...current,
       sessions: nextSessions,
       readings: nextReadings,
-      weeks: buildWeeks(nextReadings),
+      weeks: buildWeeks(nextReadings, { includeReading: (reading) => !hiddenRoadmapIdSet(current.roadmapOverrides).has(reading.id) }),
     }));
 
     const fallbackReadingId = studyState.readings.find((item) => item.subject === newSession.subject)?.id || studyState.readings[0].id;
@@ -877,6 +1032,21 @@ export function useStudyCompanion() {
       revisionCycle: (reading.revisionCycle || 1) + 1,
     }));
     setReadings(nextReadings);
+  }
+
+  function recalculateRoadmap() {
+    setStudyState((current) => {
+      const hiddenIds = hiddenRoadmapIdSet(current.roadmapOverrides);
+      const activeReadings = current.readings.filter((reading) => !hiddenIds.has(reading.id));
+      const reassignedActive = assignRoadmapWeeks(activeReadings);
+      const activeMap = new Map(reassignedActive.map((reading) => [reading.id, reading]));
+      const nextReadings = current.readings.map((reading) => activeMap.get(reading.id) || reading);
+      return {
+        ...current,
+        readings: nextReadings,
+        weeks: buildWeeks(nextReadings, { includeReading: (reading) => !hiddenIds.has(reading.id) }),
+      };
+    });
   }
 
   function autofillReadingAssets(readingId: string) {
@@ -1307,17 +1477,33 @@ export function useStudyCompanion() {
   function answerGeneratedQuestion(subject: Subject, questionId: string, selectedOption: string) {
     setStudyState((current) => ({
       ...current,
-      uploads: current.uploads.map((upload) =>
-        upload.subject === subject
-          ? {
-              ...upload,
-              generatedAnswers: {
-                ...upload.generatedAnswers,
-                [questionId]: selectedOption,
-              },
-            }
-          : upload,
-      ),
+      uploads: current.uploads.map((upload) => {
+        if (upload.subject !== subject) return upload;
+
+        const generatedAnswers = {
+          ...upload.generatedAnswers,
+          [questionId]: selectedOption,
+        };
+
+        // Durably record the attempt so chapter coverage survives even if the set is
+        // regenerated without saving. Upsert by question text within the chapter.
+        let coverageLog = upload.coverageLog || [];
+        const question = upload.generatedSet?.questions.find((item) => item.id === questionId);
+        const chapterTitle = upload.generatedSet?.chapterTitle || "";
+        if (question && chapterTitle) {
+          const correct = Boolean(
+            question.answer && selectedOption && selectedOption.trim().toLowerCase() === question.answer.trim().toLowerCase(),
+          );
+          const questionText = question.question;
+          const filtered = coverageLog.filter((entry) => !(entry.chapterTitle === chapterTitle && entry.questionText === questionText));
+          coverageLog = [
+            ...filtered,
+            { chapterTitle, questionText, tags: Array.isArray(question.tags) ? question.tags : [], correct, date: todayISO() },
+          ];
+        }
+
+        return { ...upload, generatedAnswers, coverageLog };
+      }),
     }));
   }
 
@@ -1624,6 +1810,7 @@ export function useStudyCompanion() {
     setStartDate,
     resetStartDateToToday,
     setSelectedSubject,
+    setWeeklySelectedSubject,
     setSelectedReadingId,
     setBackendBaseUrl,
     updateReading,
@@ -1631,6 +1818,7 @@ export function useStudyCompanion() {
     markReadingStudied,
     markReviewUpdated,
     snoozeReview,
+    completeReviewForReading,
     setReadingStudyDate,
     setReadingConfidence,
     handleReadingConfidence,
@@ -1639,6 +1827,12 @@ export function useStudyCompanion() {
     markReadingDone,
     resetSubjectForRevision,
     resetAllForRevision,
+    recalculateRoadmap,
+    renameRoadmapReading,
+    hideRoadmapReading,
+    restoreRoadmapReading,
+    getDisplayReadingTitle,
+    isRoadmapReadingHidden: (readingId: string) => isRoadmapReadingHidden(studyState, readingId),
     autofillReadingAssets,
     addCard,
     generateCardsFromSelectedReading,

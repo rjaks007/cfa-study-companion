@@ -8,6 +8,7 @@ type ReminderReading = {
   nextReview: string;
   pendingReview?: boolean;
   pendingReviewDate?: string;
+  hidden?: boolean;
 };
 
 function withLocalTime(isoDate: string, hours: number) {
@@ -76,6 +77,7 @@ export async function scheduleReviewNotifications(readings: ReminderReading[]) {
       ...reading,
       effectiveReviewDate: reading.pendingReview && reading.pendingReviewDate ? reading.pendingReviewDate : reading.nextReview,
     }))
+    .filter((reading) => !reading.hidden)
     .filter((reading) => reading.effectiveReviewDate)
     .sort((left, right) => new Date(left.effectiveReviewDate).getTime() - new Date(right.effectiveReviewDate).getTime())
     .slice(0, 40);

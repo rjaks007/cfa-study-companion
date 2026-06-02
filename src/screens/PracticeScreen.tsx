@@ -1,15 +1,22 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { ActionButton, Badge, EmptyState, Panel, uiStyles } from "../components/ui";
+import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
+import { buildTopicCoverage } from "../utils/coverage";
 
 type PracticeSection = "generate" | "saved" | "review" | "assistant";
 
 function normalizeDifficultyLabel(value: PracticeDifficulty) {
-  if (value === "1") return "Level 1 · Normal";
-  if (value === "2") return "Level 2 · Exam";
-  return "Level 3 · Hard";
+  if (value === "1") return "Foundational";
+  if (value === "2") return "Exam";
+  return "Hard";
+}
+
+function formatClock(totalSec: number) {
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function generatedSummary(upload: UploadRecord) {
@@ -56,6 +63,12 @@ export function PracticeScreen({
   targetSubject,
   targetChapterTitle,
   onConsumeTarget,
+  reviewRequest,
+  onCompleteReview,
+  assistantQuestion,
+  setAssistantQuestion,
+  assistantAnswer,
+  setAssistantAnswer,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -83,6 +96,12 @@ export function PracticeScreen({
   targetSubject?: Subject;
   targetChapterTitle?: string;
   onConsumeTarget?: () => void;
+  reviewRequest?: { subject?: Subject; chapterTitle?: string; nonce?: string };
+  onCompleteReview?: (subject: Subject, chapterTitle: string, accuracyPercent: number, nudge?: "hard" | "good" | "easy") => void;
+  assistantQuestion: string;
+  setAssistantQuestion: (value: string) => void;
+  assistantAnswer: string;
+  setAssistantAnswer: (value: string) => void;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
@@ -91,15 +110,20 @@ export function PracticeScreen({
   const [difficulty, setDifficulty] = useState<PracticeDifficulty>("1");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showUploads, setShowUploads] = useState(false);
-  const [showChapterFocus, setShowChapterFocus] = useState(false);
-  const [assistantQuestion, setAssistantQuestion] = useState("");
-  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [showCoverageTopics, setShowCoverageTopics] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [activeSection, setActiveSection] = useState<PracticeSection>("generate");
   const [returnQuestionId, setReturnQuestionId] = useState("");
   const [highlightedQuestionId, setHighlightedQuestionId] = useState("");
+  const [practiceMode, setPracticeMode] = useState<"practice" | "test">("practice");
+  const [submitted, setSubmitted] = useState(false);
+  const [guessed, setGuessed] = useState<Record<string, boolean>>({});
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [reviewContext, setReviewContext] = useState<{ subject: Subject; chapterTitle: string } | null>(null);
+  const [reviewScheduled, setReviewScheduled] = useState(false);
+  const handledReviewNonce = useRef("");
 
   useEffect(() => {
     if (!selectedSubject && parsedSubjects[0]) {
@@ -131,8 +155,40 @@ export function PracticeScreen({
     }
   }, [activeUpload, onConsumeTarget, selectedChapter, targetChapterTitle]);
 
+  const currentSetId = activeUpload?.generatedSet?.id || "";
+
+  // Reset the timer, guesses and submitted state whenever a different set loads.
+  useEffect(() => {
+    setSubmitted(false);
+    setGuessed({});
+    setElapsedSec(0);
+  }, [currentSetId]);
+
+  // Tick the practice clock while a set is open and not yet submitted.
+  useEffect(() => {
+    if (!currentSetId || submitted) return;
+    const timer = setInterval(() => setElapsedSec((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [currentSetId, submitted]);
+
+  // When a review quiz is launched from the Overview screen, auto-start it once.
+  useEffect(() => {
+    const nonce = reviewRequest?.nonce;
+    const subject = reviewRequest?.subject;
+    const chapterTitle = reviewRequest?.chapterTitle;
+    if (!nonce || !subject || !chapterTitle) return;
+    if (handledReviewNonce.current === nonce) return;
+    handledReviewNonce.current = nonce;
+    setSelectedSubject(subject);
+    setActiveSection("generate");
+    setPracticeMode("test");
+    void startReviewQuiz(subject, chapterTitle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewRequest?.nonce]);
+
   const generatedStats = useMemo(() => (activeUpload ? generatedSummary(activeUpload) : { total: 0, answered: 0, correct: 0, wrong: 0, accuracy: 0 }), [activeUpload]);
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
+  const chapterCoverage = useMemo(() => buildTopicCoverage(activeUpload || undefined, selectedChapter), [activeUpload, selectedChapter]);
   const activeReading = readings.find((reading) => reading.subject === selectedSubject && reading.title === selectedChapter) || null;
   const confidencePercent = activeReading ? activeReading.confidence * 10 : 0;
   const confidenceGap = activeReading && generatedStats.answered ? confidencePercent - generatedStats.accuracy : 0;
@@ -142,13 +198,27 @@ export function PracticeScreen({
         return selected && question.answer && selected.trim().toLowerCase() !== question.answer.trim().toLowerCase();
       })
     : [];
+  const setQuestions = activeUpload?.generatedSet?.questions || [];
+  // In Test mode we hide correctness until the user submits; Practice mode reveals instantly.
+  const revealed = practiceMode === "practice" || submitted;
+  const guessedRightCount = setQuestions.filter((question) => {
+    const selected = activeUpload?.generatedAnswers[question.id];
+    const isCorrect = selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
+    return isCorrect && guessed[question.id];
+  }).length;
+  const targetSec = setQuestions.length * 90;
+
+  function toggleGuess(questionId: string) {
+    setGuessed((current) => ({ ...current, [questionId]: !current[questionId] }));
+  }
+
   const chapterHistory = useMemo(
     () => activeUpload?.practiceHistory.filter((entry) => entry.chapterTitle === selectedChapter) || [],
     [activeUpload?.practiceHistory, selectedChapter],
   );
   const historyByDifficulty = useMemo(
     () =>
-      (["1", "2", "3"] as PracticeDifficulty[]).map((level) => {
+      (["1", "2"] as PracticeDifficulty[]).map((level) => {
         const rows = chapterHistory.filter((entry) => entry.difficulty === level);
         return {
           difficulty: level,
@@ -190,6 +260,9 @@ export function PracticeScreen({
 
   async function handleGeneratePractice(options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[]; count?: number }) {
     if (!selectedSubject || !selectedChapter) return;
+    // A manual generate is not a review session.
+    setReviewContext(null);
+    setReviewScheduled(false);
     try {
       setGenerating(true);
       await generatePracticeSet(selectedSubject, selectedChapter, options?.count || Number(questionCount || 10), difficulty, {
@@ -205,6 +278,56 @@ export function PracticeScreen({
     } finally {
       setGenerating(false);
     }
+  }
+
+  // Collects the candidate's weak spots for a chapter so the review quiz targets them.
+  function buildReviewFocusTopics(upload: UploadRecord, chapterTitle: string) {
+    const fromWrong = upload.wrongQuestions
+      .filter((entry) => entry.chapterTitle === chapterTitle)
+      .flatMap((entry) => (entry.question.tags && entry.question.tags.length ? entry.question.tags : [entry.question.question]));
+    const parsed = upload.parsedChapters.find((chapter) => chapter.readingTitle === chapterTitle);
+    const fromTraps = parsed?.commonTraps || [];
+    return Array.from(new Set([...fromWrong, ...fromTraps].filter(Boolean))).slice(0, 8);
+  }
+
+  // Launches a short, high-yield, exam-weighted retention quiz for a chapter.
+  async function startReviewQuiz(subject: Subject, chapterTitle: string) {
+    const upload = uploads.find((item) => item.subject === subject);
+    const parsed = upload?.parsedChapters.find((chapter) => chapter.readingTitle === chapterTitle);
+    if (!upload || !parsed) {
+      setReviewContext(null);
+      Alert.alert(
+        "Pick the chapter",
+        `I couldn't match "${chapterTitle}" to your synced material for ${subject}. Open the chapter below and tap Create practice set.`,
+      );
+      return;
+    }
+    setSelectedChapter(chapterTitle);
+    setReviewContext({ subject, chapterTitle });
+    setReviewScheduled(false);
+    setDifficulty("2");
+    const losCount = parsed.losChecklist?.length || 0;
+    const count = Math.max(8, Math.min(15, losCount ? Math.round(losCount * 1.5) : 10));
+    const focusTopics = buildReviewFocusTopics(upload, chapterTitle);
+    try {
+      setGenerating(true);
+      await generatePracticeSet(subject, chapterTitle, count, "2", { mode: "review-focus", focusTopics });
+      setActiveSection("generate");
+      setHighlightedQuestionId("");
+    } catch (error) {
+      setReviewContext(null);
+      Alert.alert("Couldn't start review", error instanceof Error ? error.message : "The review quiz could not be created.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // Closes the review loop: turns the quiz score into a confidence update + reschedule.
+  function finishReview(nudge: "hard" | "good" | "easy") {
+    if (!reviewContext) return;
+    const accuracy = generatedStats.total ? Math.round((generatedStats.correct / generatedStats.total) * 100) : 0;
+    onCompleteReview?.(reviewContext.subject, reviewContext.chapterTitle, accuracy, nudge);
+    setReviewScheduled(true);
   }
 
   async function handleAnalyzePractice() {
@@ -339,52 +462,44 @@ export function PracticeScreen({
                       ))}
                     </ScrollView>
 
-                    {activeParsedChapter ? (
+                    {activeParsedChapter && chapterCoverage.total ? (
                       <View style={styles.summaryCard}>
-                        <Pressable style={styles.advancedHeader} onPress={() => setShowChapterFocus((current) => !current)}>
-                          <Text style={styles.cardTitle}>Chapter focus</Text>
-                          <Badge text={showChapterFocus ? "Hide" : "Show"} tone="accent" />
-                        </Pressable>
-                        {showChapterFocus ? (
-                          <>
-                            {activeParsedChapter.notesSummary ? <Text style={styles.metaText}>{activeParsedChapter.notesSummary}</Text> : null}
-                            {activeParsedChapter.losChecklist.length ? (
-                              <>
-                                <Text style={styles.sectionLabel}>LOS checklist</Text>
-                                <View style={styles.badgeWrap}>
-                                  {activeParsedChapter.losChecklist.map((item) => (
-                                    <Badge key={item} text={item} tone="primary" />
-                                  ))}
-                                </View>
-                              </>
-                            ) : null}
-                            {activeParsedChapter.keySubtopics.length ? (
-                              <>
-                                <Text style={styles.sectionLabel}>Must-cover topics</Text>
-                                <View style={styles.badgeWrap}>
-                                  {activeParsedChapter.keySubtopics.map((topic) => (
-                                    <Badge key={topic} text={topic} tone="accent" />
-                                  ))}
-                                </View>
-                              </>
-                            ) : null}
-                            {activeParsedChapter.formulas.length ? (
-                              <>
-                                <Text style={styles.sectionLabel}>Core formulas</Text>
-                                <View style={styles.badgeWrap}>
-                                  {activeParsedChapter.formulas.map((formula) => (
-                                    <Badge key={formula} text={formula} tone="warning" />
-                                  ))}
-                                </View>
-                              </>
-                            ) : null}
-                            {activeParsedChapter.calculatorGuidance.length ? (
-                              <>
-                                <Text style={styles.sectionLabel}>BA II Plus</Text>
-                                <Text style={styles.metaText}>{activeParsedChapter.calculatorGuidance.join(" ")}</Text>
-                              </>
-                            ) : null}
-                          </>
+                        <Text style={styles.cardTitle}>Chapter coverage</Text>
+                        <Text style={styles.metaText}>
+                          {chapterCoverage.solid}/{chapterCoverage.total} topics solid · {chapterCoverage.percent}%
+                        </Text>
+                        <ProgressBar progress={chapterCoverage.percent} />
+                        <View style={styles.inlineRow}>
+                          {chapterCoverage.untestedTopics.length ? (
+                            <ActionButton
+                              label={`Practice untested (${chapterCoverage.untestedTopics.length})`}
+                              icon="add-circle-outline"
+                              onPress={() => void handleGeneratePractice({ mode: "review-focus", focusTopics: chapterCoverage.untestedTopics })}
+                              compact
+                            />
+                          ) : null}
+                          {chapterCoverage.weakTopics.length ? (
+                            <ActionButton
+                              label={`Drill weak (${chapterCoverage.weakTopics.length})`}
+                              icon="barbell-outline"
+                              onPress={() => void handleGeneratePractice({ mode: "weak-topics-retry", focusTopics: chapterCoverage.weakTopics })}
+                              compact
+                            />
+                          ) : null}
+                          <Pressable style={styles.guessChip} onPress={() => setShowCoverageTopics((current) => !current)}>
+                            <Text style={styles.guessChipText}>{showCoverageTopics ? "Hide topics" : "See topics"}</Text>
+                          </Pressable>
+                        </View>
+                        {showCoverageTopics ? (
+                          <View style={styles.badgeWrap}>
+                            {chapterCoverage.topics.map((entry) => (
+                              <Badge
+                                key={entry.topic}
+                                text={entry.topic}
+                                tone={entry.status === "solid" ? "success" : entry.status === "weak" ? "warning" : "neutral"}
+                              />
+                            ))}
+                          </View>
                         ) : null}
                       </View>
                     ) : null}
@@ -420,9 +535,19 @@ export function PracticeScreen({
                       />
                       <Text style={styles.sectionLabel}>Difficulty</Text>
                       <View style={styles.inlineRow}>
-                        {(["1", "2", "3"] as PracticeDifficulty[]).map((level) => (
+                        {(["1", "2"] as PracticeDifficulty[]).map((level) => (
                           <Pressable key={level} style={[styles.levelChip, difficulty === level && styles.levelChipActive]} onPress={() => setDifficulty(level)}>
                             <Text style={[styles.levelChipText, difficulty === level && styles.levelChipTextActive]}>{normalizeDifficultyLabel(level)}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.sectionLabel}>Mode</Text>
+                      <View style={styles.inlineRow}>
+                        {(["practice", "test"] as const).map((mode) => (
+                          <Pressable key={mode} style={[styles.levelChip, practiceMode === mode && styles.levelChipActive]} onPress={() => setPracticeMode(mode)}>
+                            <Text style={[styles.levelChipText, practiceMode === mode && styles.levelChipTextActive]}>
+                              {mode === "practice" ? "Practice · instant feedback" : "Test · score at the end"}
+                            </Text>
                           </Pressable>
                         ))}
                       </View>
@@ -443,21 +568,79 @@ export function PracticeScreen({
                 <View style={styles.summaryCard}>
                   <Text style={styles.cardTitle}>{activeUpload.generatedSet.chapterTitle}</Text>
                   <Text style={styles.metaText}>
-                    {activeUpload.generatedSet.questionCount} questions · {normalizeDifficultyLabel(activeUpload.generatedSet.difficulty)}
+                    {activeUpload.generatedSet.questionCount} questions · {normalizeDifficultyLabel(activeUpload.generatedSet.difficulty)} · {practiceMode === "test" ? "Test mode" : "Practice mode"}
                   </Text>
+                  {reviewContext ? <Text style={styles.metaText}>Review quiz · high-yield + your weak spots</Text> : null}
                   <View style={styles.badgeWrap}>
+                    {reviewContext ? <Badge text="Review quiz" tone="primary" /> : null}
+                    <Badge text={`⏱ ${formatClock(elapsedSec)}`} tone={practiceMode === "test" && elapsedSec > targetSec ? "danger" : "neutral"} />
+                    {practiceMode === "test" ? <Badge text={`Target ${formatClock(targetSec)}`} tone="accent" /> : null}
                     <Badge text={`Answered ${generatedStats.answered}/${generatedStats.total}`} tone="accent" />
-                    <Badge text={`Correct ${generatedStats.correct}`} tone="success" />
-                    <Badge text={`Wrong ${generatedStats.wrong}`} tone="danger" />
-                    <Badge text={`Accuracy ${generatedStats.accuracy}%`} tone="warning" />
+                    {revealed ? (
+                      <>
+                        <Badge text={`Correct ${generatedStats.correct}`} tone="success" />
+                        <Badge text={`Wrong ${generatedStats.wrong}`} tone="danger" />
+                        <Badge text={`Accuracy ${generatedStats.accuracy}%`} tone="warning" />
+                      </>
+                    ) : null}
                   </View>
+
+                  {practiceMode === "test" && !submitted ? (
+                    <ActionButton
+                      label={`Submit test (${generatedStats.answered}/${generatedStats.total} answered)`}
+                      icon="checkmark-done-outline"
+                      onPress={() => setSubmitted(true)}
+                    />
+                  ) : null}
+
+                  {practiceMode === "test" && submitted ? (
+                    <View style={styles.feedbackCard}>
+                      <Text style={styles.feedbackTitle}>Test result</Text>
+                      <Text style={styles.feedbackLine}>
+                        Score {generatedStats.correct}/{generatedStats.total} · {generatedStats.accuracy}% accuracy
+                      </Text>
+                      <Text style={styles.feedbackLine}>
+                        Time {formatClock(elapsedSec)} · pace {generatedStats.answered ? formatClock(Math.round(elapsedSec / generatedStats.answered)) : "0:00"}/question (exam target 1:30)
+                      </Text>
+                      {guessedRightCount ? (
+                        <Text style={styles.feedbackLine}>
+                          {guessedRightCount} correct {guessedRightCount === 1 ? "answer was" : "answers were"} flagged as a guess — treat {guessedRightCount === 1 ? "it" : "them"} as a weak spot to revisit.
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {reviewContext && submitted ? (
+                    <View style={styles.summaryCard}>
+                      {reviewScheduled ? (
+                        <Text style={styles.feedbackTitle}>✓ Next review scheduled from this score.</Text>
+                      ) : (
+                        <>
+                          <Text style={styles.cardTitle}>Schedule next review</Text>
+                          <Text style={styles.metaText}>How did that feel? This sets when this chapter comes back.</Text>
+                          <View style={styles.inlineRow}>
+                            <Pressable style={styles.levelChip} onPress={() => finishReview("hard")}>
+                              <Text style={styles.levelChipText}>Tough · sooner</Text>
+                            </Pressable>
+                            <Pressable style={styles.levelChip} onPress={() => finishReview("good")}>
+                              <Text style={styles.levelChipText}>OK</Text>
+                            </Pressable>
+                            <Pressable style={styles.levelChip} onPress={() => finishReview("easy")}>
+                              <Text style={styles.levelChipText}>Easy · later</Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+
                   <View style={styles.inlineRow}>
                     <ActionButton label="Save this set" icon="bookmark-outline" onPress={handleSaveCurrentSet} compact />
                     <ActionButton label={analyzing ? "Building review..." : "Analyze my weak areas"} icon="analytics-outline" onPress={() => void handleAnalyzePractice()} compact />
                   </View>
                 </View>
 
-                {activeReading && generatedStats.answered ? (
+                {activeReading && generatedStats.answered && revealed ? (
                   <View style={styles.summaryCard}>
                     <Text style={styles.cardTitle}>Confidence calibration</Text>
                     <Text style={styles.metaText}>
@@ -479,6 +662,8 @@ export function PracticeScreen({
                 {activeUpload.generatedSet.questions.map((question, index) => {
                   const selected = activeUpload.generatedAnswers[question.id];
                   const isCorrect = selected && question.answer ? selected.trim().toLowerCase() === question.answer.trim().toLowerCase() : false;
+                  // Practice mode reveals as soon as you answer; Test mode hides everything until submit.
+                  const showAnswer = practiceMode === "test" ? submitted : Boolean(selected);
                   return (
                     <View key={question.id} style={[styles.questionCard, highlightedQuestionId === question.id && styles.questionCardHighlighted]}>
                       <Text style={styles.questionTitle}>
@@ -487,7 +672,7 @@ export function PracticeScreen({
                       <View style={styles.optionWrap}>
                         {question.options.map((option) => {
                           const chosen = selected === option;
-                          const revealCorrect = Boolean(selected && question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
+                          const revealCorrect = showAnswer && Boolean(question.answer && option.trim().toLowerCase() === question.answer.trim().toLowerCase());
                           return (
                             <Pressable
                               key={option}
@@ -501,11 +686,21 @@ export function PracticeScreen({
                       </View>
                       <View style={styles.inlineRow}>
                         <ActionButton label="Save question" icon="bookmark-outline" onPress={() => handleBookmarkQuestion(question)} compact />
-                        {!isCorrect && selected && question.answer ? (
+                        {selected ? (
+                          <Pressable
+                            style={[styles.guessChip, guessed[question.id] && styles.guessChipActive]}
+                            onPress={() => toggleGuess(question.id)}
+                          >
+                            <Text style={[styles.guessChipText, guessed[question.id] && styles.guessChipTextActive]}>
+                              {guessed[question.id] ? "Marked as guess" : "I guessed"}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        {showAnswer && !isCorrect && selected && question.answer ? (
                           <ActionButton label="Explain why wrong" icon="help-circle-outline" onPress={() => void explainWrongAnswer(question)} compact />
                         ) : null}
                       </View>
-                      {selected ? (
+                      {showAnswer && selected ? (
                         <View style={styles.feedbackCard}>
                           <Text style={styles.feedbackTitle}>{question.answer ? (isCorrect ? "Correct" : "Needs review") : "Saved answer"}</Text>
                           {question.answer ? <Text style={styles.feedbackLine}>Answer: {question.answer}</Text> : null}
@@ -804,7 +999,48 @@ export function PracticeScreen({
                   }
                   compact
                 />
+                <ActionButton
+                  label="Explain simply"
+                  icon="bulb-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Explain the hardest idea in ${selectedChapter || selectedSubject} as simply as possible, as if I am new to finance, using one short everyday analogy.`, {
+                      mode: "explain-simply",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Memory hook"
+                  icon="bookmark-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Give me a memory hook or mnemonic to remember the key formulas and concepts in ${selectedChapter || selectedSubject}, with a one-line reason it works.`, {
+                      mode: "memory-hook",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Common mistakes"
+                  icon="alert-circle-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`List the most common mistakes and exam traps students fall for in ${selectedChapter || selectedSubject}, and tell me exactly how to avoid each one.`, {
+                      mode: "common-mistakes",
+                    })
+                  }
+                  compact
+                />
+                <ActionButton
+                  label="Compare terms"
+                  icon="swap-horizontal-outline"
+                  onPress={() =>
+                    void runAssistantPreset(`Compare the most easily-confused terms or concepts in ${selectedChapter || selectedSubject} side by side, so I stop mixing them up. Keep each contrast short.`, {
+                      mode: "compare-terms",
+                    })
+                  }
+                  compact
+                />
               </View>
+              <Text style={styles.copy}>Focused on: {selectedChapter || selectedSubject}</Text>
               {assistantAnswer ? (
                 <View style={styles.summaryCard}>
                   <Text style={styles.cardTitle}>Assistant answer</Text>
@@ -1057,6 +1293,26 @@ const styles = StyleSheet.create({
   optionTextCorrect: {
     color: colors.success,
     fontWeight: "700",
+  },
+  guessChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  guessChipActive: {
+    borderColor: colors.warning,
+    backgroundColor: colors.warningSoft,
+  },
+  guessChipText: {
+    color: colors.inkSoft,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  guessChipTextActive: {
+    color: colors.warning,
   },
   feedbackCard: {
     backgroundColor: colors.surface,

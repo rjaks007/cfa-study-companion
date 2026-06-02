@@ -184,7 +184,49 @@ export function buildReadings() {
   return readings;
 }
 
-export function buildWeeks(readings: Reading[]) {
+export function assignRoadmapWeeks(readings: Reading[]) {
+  const nextReadings = readings.map((reading) => ({ ...reading }));
+  let week = 1;
+  let weekdaySlots = 5;
+  let weekendCapacity = 8;
+
+  nextReadings.forEach((reading) => {
+    const load = reading.estimatedHours || 3;
+    if (weekdaySlots <= 0 && weekendCapacity <= 0) {
+      week += 1;
+      weekdaySlots = 5;
+      weekendCapacity = 8;
+    }
+
+    if (load <= 2.2 && weekdaySlots > 0) {
+      reading.weekAssigned = week;
+      weekdaySlots -= 1;
+    } else if (weekdaySlots > 0 && weekendCapacity >= Math.max(2, Math.ceil(load))) {
+      reading.weekAssigned = week;
+      weekdaySlots -= 1;
+      weekendCapacity -= Math.max(1, Math.ceil(load - 1));
+    } else if (weekendCapacity >= Math.ceil(load)) {
+      reading.weekAssigned = week;
+      weekendCapacity -= Math.ceil(load);
+    } else {
+      week += 1;
+      weekdaySlots = 5;
+      weekendCapacity = 8;
+      reading.weekAssigned = week;
+      if (load <= 2.2) weekdaySlots -= 1;
+      else weekendCapacity -= Math.ceil(load);
+    }
+  });
+
+  return nextReadings;
+}
+
+export function buildWeeks(
+  readings: Reading[],
+  options?: {
+    includeReading?: (reading: Reading) => boolean;
+  },
+) {
   const weeks: WeekPlan[] = Array.from({ length: 26 }, (_, index) => ({
     week: index + 1,
     readings: [],
@@ -192,6 +234,7 @@ export function buildWeeks(readings: Reading[]) {
   }));
 
   readings.forEach((reading) => {
+    if (options?.includeReading && !options.includeReading(reading)) return;
     const position = Math.min(25, Math.max(0, reading.weekAssigned - 1));
     weeks[position].readings.push(reading.id);
   });
@@ -234,6 +277,7 @@ export function defaultUploads() {
     savedSets: [],
     savedQuestions: [],
     wrongQuestions: [],
+    coverageLog: [],
   }));
 }
 
@@ -292,11 +336,13 @@ export function createInitialState(): StoredState {
     startDate: todayISO(),
     readings,
     weeks: buildWeeks(readings),
+    roadmapOverrides: {},
     sessions: [],
     cards: starterCards(),
     uploads: defaultUploads(),
     mocks: defaultMocks(),
     selectedSubject: SUBJECT_ORDER[0],
+    weeklySelectedSubject: SUBJECT_ORDER[0],
     selectedReadingId: readings[0].id,
     backendBaseUrl: "http://localhost:8787",
     notificationsEnabled: false,

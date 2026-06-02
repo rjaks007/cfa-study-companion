@@ -101,6 +101,11 @@ export interface WeekPlan {
   revisionFocus?: string[];
 }
 
+export interface RoadmapOverride {
+  alias?: string;
+  hidden?: boolean;
+}
+
 export interface StudySession {
   id: string;
   date: string;
@@ -207,6 +212,14 @@ export interface GeneratedPracticeReview {
   numericalExample: string;
 }
 
+export interface CoverageAttempt {
+  chapterTitle: string;
+  questionText: string;
+  tags: string[];
+  correct: boolean;
+  date: string;
+}
+
 export interface UploadRecord {
   subject: Subject;
   notesPdfName: string;
@@ -230,6 +243,7 @@ export interface UploadRecord {
   savedSets: SavedPracticeSet[];
   savedQuestions: SavedPracticeQuestion[];
   wrongQuestions: SavedPracticeQuestion[];
+  coverageLog: CoverageAttempt[];
 }
 
 export interface MockExam {
@@ -245,11 +259,13 @@ export interface StoredState {
   startDate: string;
   readings: Reading[];
   weeks: WeekPlan[];
+  roadmapOverrides: Record<string, RoadmapOverride>;
   sessions: StudySession[];
   cards: Flashcard[];
   uploads: UploadRecord[];
   mocks: MockExam[];
   selectedSubject: Subject;
+  weeklySelectedSubject: Subject;
   selectedReadingId: string;
   backendBaseUrl: string;
   notificationsEnabled: boolean;

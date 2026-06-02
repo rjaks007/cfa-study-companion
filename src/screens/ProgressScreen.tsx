@@ -1,18 +1,20 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
-import { Reading, Subject } from "../types";
-import { formatShortDate } from "../utils/study";
+import { Reading, Subject, UploadRecord } from "../types";
+import { buildTopicCoverage } from "../utils/coverage";
 
 export function ProgressScreen({
   subjectStats,
   readings,
+  uploads,
   onOpenSubject,
   onOpenReading,
 }: {
   subjectStats: Array<{ subject: Subject; total: number; done: number; avg: number; due: number; progress: number }>;
   readings: Reading[];
+  uploads: UploadRecord[];
   onOpenSubject: (subject: Subject) => void;
   onOpenReading: (reading: Reading) => void;
 }) {
@@ -22,8 +24,57 @@ export function ProgressScreen({
     setExpandedSubjects((current) => ({ ...current, [subject]: !current[subject] }));
   }
 
+  const uploadBySubject = useMemo(() => {
+    const map = {} as Record<string, UploadRecord>;
+    uploads.forEach((upload) => {
+      map[upload.subject] = upload;
+    });
+    return map;
+  }, [uploads]);
+
+  // "What to study next": confirmed weak topics first, then untested, across all subjects.
+  const studyNext = useMemo(() => {
+    const weak: Array<{ subject: Subject; topic: string }> = [];
+    const untested: Array<{ subject: Subject; topic: string }> = [];
+    uploads.forEach((upload) => {
+      upload.parsedChapters.forEach((chapter) => {
+        const coverage = buildTopicCoverage(upload, chapter.readingTitle);
+        coverage.weakTopics.forEach((topic) => weak.push({ subject: upload.subject, topic }));
+        coverage.untestedTopics.forEach((topic) => untested.push({ subject: upload.subject, topic }));
+      });
+    });
+    return { weak: weak.slice(0, 6), untested: untested.slice(0, 6) };
+  }, [uploads]);
+
+  const hasStudyNext = studyNext.weak.length > 0 || studyNext.untested.length > 0;
+
   return (
     <>
+      {hasStudyNext ? (
+        <Panel title="What to study next" icon="trending-up-outline">
+          {studyNext.weak.length ? (
+            <>
+              <Text style={styles.copy}>Topics you have missed — drill these first.</Text>
+              <View style={styles.chipWrap}>
+                {studyNext.weak.map((item) => (
+                  <Badge key={`w-${item.subject}-${item.topic}`} text={item.topic} tone="warning" />
+                ))}
+              </View>
+            </>
+          ) : null}
+          {studyNext.untested.length ? (
+            <>
+              <Text style={styles.copy}>Not tested yet — cover these to fill gaps.</Text>
+              <View style={styles.chipWrap}>
+                {studyNext.untested.map((item) => (
+                  <Badge key={`u-${item.subject}-${item.topic}`} text={item.topic} tone="neutral" />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </Panel>
+      ) : null}
+
       <Panel title="Progress" icon="bar-chart-outline">
         <Text style={styles.copy}>Tap a subject to open or hide its chapters. Tap any chapter card to jump into Weekly Plan with that reading opened and highlighted in its own week.</Text>
         {subjectStats.map((stat) => {
@@ -46,9 +97,8 @@ export function ProgressScreen({
               </Pressable>
 
               <ProgressBar progress={stat.progress} />
-
               <Pressable style={styles.jumpLine} onPress={() => onOpenSubject(stat.subject)}>
-                <Text style={styles.jumpText}>Main study flow for this subject</Text>
+                <Text style={styles.jumpText}>Open weekly plan</Text>
               </Pressable>
 
               {isExpanded ? (
@@ -61,15 +111,25 @@ export function ProgressScreen({
                           <Text numberOfLines={1} style={styles.readingRowTitle}>
                             {reading.title}
                           </Text>
-                          <Text style={styles.readingChipMeta}>
-                            Rev {reading.reviewHistory.length} · Week {reading.weekAssigned}
-                          </Text>
                         </View>
                       </View>
                       <View style={styles.readingMetrics}>
-                        <Badge text={reading.status} tone={reading.status === "done" ? "success" : reading.status === "in-progress" ? "warning" : "neutral"} />
+                        <Badge
+                          text={reading.pendingReview ? "Due" : reading.status === "done" ? "Done" : reading.status === "in-progress" ? "Studying" : "Not started"}
+                          tone={reading.pendingReview ? "danger" : reading.status === "done" ? "success" : reading.status === "in-progress" ? "warning" : "neutral"}
+                        />
                         <Badge text={`C${reading.confidence || 0}`} tone={reading.confidence >= 8 ? "success" : reading.confidence >= 5 ? "accent" : "danger"} />
-                        <Badge text={reading.pendingReview ? "Due" : `Next ${formatShortDate(reading.nextReview)}`} tone={reading.pendingReview ? "danger" : "neutral"} />
+                        {(() => {
+                          const upload = uploadBySubject[reading.subject];
+                          const coverage = upload ? buildTopicCoverage(upload, reading.title) : null;
+                          if (!coverage || !coverage.total) return null;
+                          return (
+                            <Badge
+                              text={`Cov ${coverage.percent}%`}
+                              tone={coverage.percent >= 80 ? "success" : coverage.percent >= 40 ? "accent" : "neutral"}
+                            />
+                          );
+                        })()}
                       </View>
                     </Pressable>
                   ))}
@@ -100,7 +160,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    gap: 12,
+    gap: 10,
   },
   subjectHeader: {
     flexDirection: "row",
@@ -142,7 +202,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 10,
   },
   readingLead: {
@@ -175,7 +236,12 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 6,
     justifyContent: "flex-end",
-    maxWidth: "48%",
+    maxWidth: "46%",
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
   flex: {
     flex: 1,

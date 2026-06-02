@@ -1,23 +1,69 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import Anthropic from "@anthropic-ai/sdk";
+
+// Load .env, then backfill any variable that is unset OR defined-but-empty.
+// This keeps real platform env vars (e.g. on Render) authoritative, while
+// preventing a stray empty shell variable from silently shadowing the .env key.
+const loadedEnv = dotenv.config().parsed || {};
+for (const [key, value] of Object.entries(loadedEnv)) {
+  if (!process.env[key]) process.env[key] = value;
+}
 import cors from "cors";
 import express from "express";
 import fs from "fs/promises";
 import multer from "multer";
-import OpenAI from "openai";
 import { PDFParse } from "pdf-parse";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const port = Number(process.env.PORT || 8787);
 
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("OPENAI_API_KEY is not set. AI routes will fail until you add it to backend/.env.");
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn("ANTHROPIC_API_KEY is not set. AI routes will fail until you add it to backend/.env.");
 }
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
-const BACKEND_RELEASE = "render-sync-debug-2026-03-21T14:45:21Z";
+
+// Claude model selection per task. Override any of these via env vars without code changes.
+const MODELS = {
+  // Structured extraction of uploaded PDFs into the chapter scaffold.
+  parse: process.env.CLAUDE_PARSE_MODEL || "claude-sonnet-4-6",
+  // Conversational study assistant.
+  chat: process.env.CLAUDE_CHAT_MODEL || "claude-sonnet-4-6",
+  // Practice-set generation (highest quality bar — was the flagship model on OpenAI).
+  generate: process.env.CLAUDE_GENERATE_MODEL || "claude-opus-4-8",
+  // Post-set weak-topic analysis.
+  analyze: process.env.CLAUDE_ANALYZE_MODEL || "claude-sonnet-4-6",
+};
+
+// Single entry point for Claude calls. Mirrors the old `responses.create` shape:
+// pass a system string and a single user text payload, get plain text back.
+// When `forceJson` is set we append a firm instruction to emit JSON only.
+// (We avoid assistant-message prefill because some models, e.g. Opus 4.8,
+// reject it; parseStructuredOutput already extracts the JSON robustly.)
+async function runClaude({ model, system, userText, maxTokens = 4096, forceJson = false }) {
+  const finalUserText = forceJson
+    ? `${userText}\n\nRespond with only the JSON object described in the instructions. Do not write anything before or after the JSON, and do not use markdown code fences.`
+    : userText;
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: finalUserText }],
+  });
+
+  const text = (response.content || [])
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+
+  return { text, raw: response };
+}
+
+const BACKEND_RELEASE = "render-claude-sync-2026-06-01T00:00:00Z";
 
 const OFFICIAL_LEVEL1_OUTLINE_URL = "https://www.cfainstitute.org/sites/default/files/docs/programs/cfa-program/2026-l1-topics-combined.pdf";
 const OFFICIAL_LEVEL1_OUTLINE_CACHE = "/tmp/cfa-2026-l1-topics.pdf";
@@ -381,6 +427,35 @@ function sampleTextAcrossDocument(text, totalChars = 50000, slices = 6) {
   return sampled.join("\n\n");
 }
 
+// Maps the app's difficulty tokens ("1"/"2"/"3", plus legacy "exam"/"challenge")
+// into concrete, model-readable instructions so the three buttons actually
+// change how hard the generated questions are.
+const DIFFICULTY_GUIDE = {
+  "1": {
+    label: "1",
+    instruction:
+      "Target FOUNDATIONAL difficulty: clear, mostly single-concept questions that check whether the candidate understands the core idea and its basic application. Keep distractors plausible but not tricky. Avoid multi-step traps.",
+  },
+  "2": {
+    label: "2",
+    instruction:
+      "Target EXAM-REALISTIC difficulty: fair, crisp CFA Level I exam-style questions, coverage-aware and a touch harder than basic recall, with realistic distractors that punish shallow understanding.",
+  },
+  "3": {
+    label: "3",
+    instruction:
+      "Target CHALLENGE difficulty: still strictly syllabus-faithful but more discriminating — tighter distractors, multi-step application, trap-aware reasoning, and deeper synthesis where the chapter supports it. Difficult for the right reason, never obscure or outside-syllabus.",
+  },
+};
+
+function resolveDifficulty(value) {
+  const key = String(value ?? "2").trim();
+  if (DIFFICULTY_GUIDE[key]) return DIFFICULTY_GUIDE[key];
+  if (key === "exam") return DIFFICULTY_GUIDE["2"];
+  if (key === "challenge") return DIFFICULTY_GUIDE["3"];
+  return DIFFICULTY_GUIDE["2"];
+}
+
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -431,50 +506,33 @@ app.post(
       const compactNotes = sampleTextAcrossDocument(notesText, 14000, 2);
       const compactQuestionBank = sampleTextAcrossDocument(questionBankText, 52000, 6);
 
-      const response = await client.responses.create({
-        model: "gpt-5.4-mini",
-        max_output_tokens: 12000,
-        input: [
-          {
-            role: "system",
-            content: [
-              {
-                type: "input_text",
-                text:
-                  `You are helping organize CFA Level I practice materials for ${subject}. ` +
-                  "You will receive a pre-parsed chapter scaffold from the notes PDF and supporting text from the question-bank PDF. " +
-                  "Do not invent or rename the chapter map when a scaffold is supplied. Keep one output chapter per scaffold chapter. " +
-                  "Instead, write a concise notes summary for each chapter, list the exact concepts or formulas to revise, preserve the provided LOS checklist from the notes when available, and include up to 5 representative source questions per chapter. " +
-                  "Also extract key subtopics that must not be forgotten, the main formulas, common traps, the style/pattern of questions that appear, and where the BA II Plus financial calculator is useful. " +
-                  "Return strict JSON with this shape: " +
-                  `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","losChecklist":[],"revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"sourceCoverageGaps":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
-                  "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
-              },
-            ],
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: JSON.stringify({
-                  subject,
-                  chapterScaffold: mergedModules.map((module) => ({
-                    readingTitle: module.readingTitle,
-                    losChecklist: module.losChecklist,
-                    notesExcerpt: sampleTextAcrossDocument(module.notesExcerpt, 7000, 1),
-                    questionBankExcerpt: sampleTextAcrossDocument(module.questionExcerpt, 9000, 1),
-                  })),
-                  fallbackNotesExcerpt: compactNotes,
-                  fallbackQuestionBankExcerpt: compactQuestionBank,
-                }),
-              },
-            ],
-          },
-        ],
+      const response = await runClaude({
+        model: MODELS.parse,
+        maxTokens: 16000,
+        forceJson: true,
+        system:
+          `You are helping organize CFA Level I practice materials for ${subject}. ` +
+          "You will receive a pre-parsed chapter scaffold from the notes PDF and supporting text from the question-bank PDF. " +
+          "Do not invent or rename the chapter map when a scaffold is supplied. Keep one output chapter per scaffold chapter. " +
+          "Instead, write a concise notes summary for each chapter, list the exact concepts or formulas to revise, preserve the provided LOS checklist from the notes when available, and include up to 5 representative source questions per chapter. " +
+          "Also extract key subtopics that must not be forgotten, the main formulas, common traps, the style/pattern of questions that appear, and where the BA II Plus financial calculator is useful. " +
+          "Return strict JSON with this shape: " +
+          `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","losChecklist":[],"revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"sourceCoverageGaps":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
+          "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
+        userText: JSON.stringify({
+          subject,
+          chapterScaffold: mergedModules.map((module) => ({
+            readingTitle: module.readingTitle,
+            losChecklist: module.losChecklist,
+            notesExcerpt: sampleTextAcrossDocument(module.notesExcerpt, 7000, 1),
+            questionBankExcerpt: sampleTextAcrossDocument(module.questionExcerpt, 9000, 1),
+          })),
+          fallbackNotesExcerpt: compactNotes,
+          fallbackQuestionBankExcerpt: compactQuestionBank,
+        }),
       });
 
-      const structured = parseStructuredOutput(response.output_text);
+      const structured = parseStructuredOutput(response.text);
       if (structured?.chapters?.length) {
         const enrichedChapters = await Promise.all(
           structured.chapters.map(async (chapter) => {
@@ -496,11 +554,11 @@ app.post(
       res.json({
         ok: true,
         subject,
-        model: "gpt-5.4-mini",
+        model: MODELS.parse,
         release: BACKEND_RELEASE,
         syncDebug,
-        output_text: structured ? JSON.stringify(structured) : response.output_text,
-        raw: response,
+        output_text: structured ? JSON.stringify(structured) : response.text,
+        raw: response.raw,
       });
     } catch (error) {
       console.error(error);
@@ -520,48 +578,31 @@ app.post("/api/study-chat", async (req, res) => {
       return res.status(400).json({ error: "question is required." });
     }
 
-    const response = await client.responses.create({
-      model: "gpt-5.4-mini",
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "You are a CFA Level I study assistant inside a personal study app. " +
-                "Use the supplied notes summaries, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
-                "Assume the student uses the BA II Plus financial calculator in the exam. When a numerical topic benefits from it, say where and how the calculator is useful. " +
-                "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
-                "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
-                "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
-                "When helpful, explain why the student's choice was wrong and what concept it confused. " +
-                "End with a short 'Revise next:' line only when useful.",
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify({
-                subject,
-                question,
-                performanceSummary,
-                aiSummary,
-                parsedChapters,
-                extraContext,
-              }),
-            },
-          ],
-        },
-      ],
+    const response = await runClaude({
+      model: MODELS.chat,
+      maxTokens: 2048,
+      system:
+        "You are a CFA Level I study assistant inside a personal study app. " +
+        "Use the supplied notes summaries, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
+        "Assume the student uses the BA II Plus financial calculator in the exam. When a numerical topic benefits from it, say where and how the calculator is useful. " +
+        "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
+        "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
+        "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
+        "When helpful, explain why the student's choice was wrong and what concept it confused. " +
+        "End with a short 'Revise next:' line only when useful.",
+      userText: JSON.stringify({
+        subject,
+        question,
+        performanceSummary,
+        aiSummary,
+        parsedChapters,
+        extraContext,
+      }),
     });
 
     res.json({
       ok: true,
-      answer: response.output_text,
+      answer: response.text,
       imageUrl: "",
     });
   } catch (error) {
@@ -595,6 +636,7 @@ app.post("/api/generate-practice-set", async (req, res) => {
     }
 
     const cappedCount = Math.max(3, Math.min(40, Number(questionCount || 10)));
+    const resolvedDifficulty = resolveDifficulty(difficulty);
     const chapter = Array.isArray(parsedChapters)
       ? parsedChapters.find((item) => String(item?.readingTitle || "").trim() === String(chapterTitle).trim())
       : null;
@@ -610,72 +652,65 @@ app.post("/api/generate-practice-set", async (req, res) => {
     const effectiveCoverageChecklist = Array.isArray(coverageChecklist) && coverageChecklist.length ? coverageChecklist : effectiveOfficialLos;
     const effectiveMissingTopics = Array.isArray(missingTopics) && missingTopics.length ? missingTopics : effectiveCoverageChecklist;
 
-    const response = await client.responses.create({
-      model: "gpt-5.4",
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "You create CFA Level I chapter-wise practice sets from provided source material. " +
-                "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, key subtopics, formulas, common traps, question patterns, calculator guidance, and example questions. " +
-                "Return strict JSON only with this shape: " +
-                '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
-                "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
-                "Difficulty must be either 'exam' or 'challenge'. " +
-                "'exam' means realistic CFA Level I exam-style questions: fair, crisp, coverage-aware, and a touch harder than basic recall. " +
-                "'challenge' means still syllabus-faithful but more discriminating: tighter distractors, trickier application, trap-aware reasoning, and deeper synthesis where the chapter supports it. " +
-                "Do not make challenge questions artificially obscure or outside-syllabus. Make them difficult for the right reason. " +
-                "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
-                "Use the same style and pattern of questioning suggested by the source material when possible. " +
-                "Prioritize uncovered or weak topics first when missingTopics are supplied. " +
-                "Do not repeat or lightly paraphrase existingQuestions. Treat near-duplicate questions as invalid. " +
-                "Use coverageChecklist to understand the full chapter scope, and use missingTopics as the highest-priority targets. " +
-                "If officialLearningOutcomes are supplied, treat them as the authoritative baseline for topic coverage. " +
-                "Aim for a rounded set across the official learning outcomes before repeating the same narrow angle. " +
-                "For numerical questions, mention BA II Plus usage in the explanation when it would realistically help on the exam. " +
-                "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
-                "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
-                "Do not use markdown or extra text.",
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify({
-                subject,
-                chapterTitle,
-                questionCount: cappedCount,
-                difficulty,
-                mode,
-                focusTopics,
-                baseQuestions,
-                existingQuestions,
-                missingTopics: effectiveMissingTopics,
-                coverageChecklist: effectiveCoverageChecklist,
-                officialLearningOutcomes: effectiveOfficialLos,
-                officialReadingTitle: effectiveOfficialTitle,
-                aiSummary,
-                chapter,
-              }),
-            },
-          ],
-        },
-      ],
+    const response = await runClaude({
+      model: MODELS.generate,
+      maxTokens: 16000,
+      forceJson: true,
+      system:
+        "You create CFA Level I chapter-wise practice sets from provided source material. " +
+        "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, key subtopics, formulas, common traps, question patterns, calculator guidance, and example questions. " +
+        "Return strict JSON only with this shape: " +
+        '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
+        "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
+        "Follow the supplied difficultyGuidance exactly when deciding how hard to make the questions. " +
+        "Set every question's 'difficulty' field to the supplied targetDifficulty value. " +
+        "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
+        "Use the same style and pattern of questioning suggested by the source material when possible. " +
+        "Prioritize uncovered or weak topics first when missingTopics are supplied. " +
+        "Do not repeat or lightly paraphrase existingQuestions. Treat near-duplicate questions as invalid. " +
+        "Use coverageChecklist to understand the full chapter scope, and use missingTopics as the highest-priority targets. " +
+        "If officialLearningOutcomes are supplied, treat them as the authoritative baseline for topic coverage. " +
+        "Aim for a rounded set across the official learning outcomes before repeating the same narrow angle. " +
+        "For numerical questions, mention BA II Plus usage in the explanation when it would realistically help on the exam. " +
+        "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
+        "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
+        "If mode is 'review-focus', build a SHORT high-yield retention check: select the topics most likely to be tested on the real CFA Level I exam for this reading, give extra weight to the supplied focusTopics (the candidate's weak areas), and use your own CFA expertise to judge what is high-yield — but stay strictly within the supplied syllabus and official learning outcomes, and never introduce outside-syllabus facts. Spread the questions across the most important learning outcomes rather than clustering on one. " +
+        "Do not use markdown or extra text.",
+      userText: JSON.stringify({
+        subject,
+        chapterTitle,
+        questionCount: cappedCount,
+        difficulty,
+        targetDifficulty: resolvedDifficulty.label,
+        difficultyGuidance: resolvedDifficulty.instruction,
+        mode,
+        focusTopics,
+        baseQuestions,
+        existingQuestions,
+        missingTopics: effectiveMissingTopics,
+        coverageChecklist: effectiveCoverageChecklist,
+        officialLearningOutcomes: effectiveOfficialLos,
+        officialReadingTitle: effectiveOfficialTitle,
+        aiSummary,
+        chapter,
+      }),
     });
 
-    const structured = parseStructuredOutput(response.output_text);
+    const structured = parseStructuredOutput(response.text);
     if (!structured?.practiceSet?.questions?.length) {
       return res.status(500).json({
         error: "The generated practice set was empty.",
         details: "AI returned no usable questions.",
       });
     }
+
+    // Guarantee the difficulty the app stores matches what the user asked for,
+    // regardless of what the model echoed back.
+    structured.practiceSet.difficulty = resolvedDifficulty.label;
+    structured.practiceSet.questions = structured.practiceSet.questions.map((question) => ({
+      ...question,
+      difficulty: resolvedDifficulty.label,
+    }));
 
     res.json({
       ok: true,
@@ -721,48 +756,32 @@ app.post("/api/analyze-practice-set", async (req, res) => {
 
     const incorrect = answeredQuestions.filter((question) => !question.correct);
 
-    const response = await client.responses.create({
-      model: "gpt-5.4-mini",
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "You are creating a weak-topic review for a CFA Level I student after a chapter practice set. " +
-                "Use the mistakes, chapter notes, revision focus, and answer patterns to produce a precise study plan. " +
-                "Return strict JSON only with this shape: " +
-                '{"review":{"summary":"","reviseTopics":[],"conceptExample":"","numericalExample":""}}. ' +
-                "The summary should say exactly what to study next. " +
-                "reviseTopics should be short exact concepts or formulas. " +
-                "conceptExample should be a short plain-language teaching example. " +
-                "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. Mention BA II Plus usage if it helps. " +
-                "Base the advice on the actual mistakes. Do not use markdown.",
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify({
-                subject,
-                chapterTitle: generatedSet.chapterTitle,
-                difficulty: generatedSet.difficulty,
-                aiSummary,
-                parsedChapters,
-                answeredQuestions,
-                incorrect,
-              }),
-            },
-          ],
-        },
-      ],
+    const response = await runClaude({
+      model: MODELS.analyze,
+      maxTokens: 2048,
+      forceJson: true,
+      system:
+        "You are creating a weak-topic review for a CFA Level I student after a chapter practice set. " +
+        "Use the mistakes, chapter notes, revision focus, and answer patterns to produce a precise study plan. " +
+        "Return strict JSON only with this shape: " +
+        '{"review":{"summary":"","reviseTopics":[],"conceptExample":"","numericalExample":""}}. ' +
+        "The summary should say exactly what to study next. " +
+        "reviseTopics should be short exact concepts or formulas. " +
+        "conceptExample should be a short plain-language teaching example. " +
+        "numericalExample should be a short worked-style numerical example when useful, otherwise an empty string. Mention BA II Plus usage if it helps. " +
+        "Base the advice on the actual mistakes. Do not use markdown.",
+      userText: JSON.stringify({
+        subject,
+        chapterTitle: generatedSet.chapterTitle,
+        difficulty: generatedSet.difficulty,
+        aiSummary,
+        parsedChapters,
+        answeredQuestions,
+        incorrect,
+      }),
     });
 
-    const structured = parseStructuredOutput(response.output_text);
+    const structured = parseStructuredOutput(response.text);
     if (!structured?.review) {
       return res.status(500).json({
         error: "The review summary came back empty.",

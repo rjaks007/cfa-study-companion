@@ -16,6 +16,12 @@ export function WeeklyPlanScreen({
   currentWeek,
   weeks,
   readingMap,
+  getRoadmapReadingTitle,
+  isRoadmapReadingHidden,
+  renameRoadmapReading,
+  hideRoadmapReading,
+  restoreRoadmapReading,
+  recalculateRoadmap,
   selectedSubject,
   setSelectedSubject,
   cycleReadingStatus,
@@ -33,6 +39,12 @@ export function WeeklyPlanScreen({
   currentWeek: number;
   weeks: WeekPlan[];
   readingMap: Record<string, Reading>;
+  getRoadmapReadingTitle: (readingId: string, fallback: string) => string;
+  isRoadmapReadingHidden: (readingId: string) => boolean;
+  renameRoadmapReading: (readingId: string, alias: string) => void;
+  hideRoadmapReading: (readingId: string) => void;
+  restoreRoadmapReading: (readingId: string) => void;
+  recalculateRoadmap: () => void;
   selectedSubject: Subject;
   setSelectedSubject: (subject: Subject) => void;
   cycleReadingStatus: (readingId: string) => void;
@@ -53,8 +65,12 @@ export function WeeklyPlanScreen({
     Object.fromEntries(weeks.map((week) => [week.week, week.week === currentWeek])),
   );
   const [customDate, setCustomDate] = useState<Record<string, string>>({});
+  const [roadmapTitleDrafts, setRoadmapTitleDrafts] = useState<Record<string, string>>({});
+  const [roadmapEditorOpen, setRoadmapEditorOpen] = useState<Record<string, boolean>>({});
+  const [hiddenSectionOpen, setHiddenSectionOpen] = useState(false);
   const [recentJump, setRecentJump] = useState<{ week?: number; readingId?: string }>({});
-  const [filterValue, setFilterValue] = useState<string>(selectedSubject);
+  // Default to showing the whole week ("All"); the user narrows by tapping a subject.
+  const [filterValue, setFilterValue] = useState<string>(FILTER_ALL);
 
   useEffect(() => {
     if (!targetWeek && !targetReadingId) return;
@@ -76,16 +92,12 @@ export function WeeklyPlanScreen({
     onConsumeTarget?.();
   }, [onConsumeTarget, targetReadingId, targetWeek]);
 
-  useEffect(() => {
-    setFilterValue(selectedSubject);
-  }, [selectedSubject]);
-
   const currentWeekReadings = useMemo(() => {
     const baseWeek = recentJump.week || currentWeek;
     const week = weeks.find((item) => item.week === baseWeek);
-    const rows = (week?.readings || []).map((id) => readingMap[id]).filter(Boolean);
+    const rows = (week?.readings || []).map((id) => readingMap[id]).filter(Boolean).filter((reading) => !isRoadmapReadingHidden(reading.id));
     return filterValue === FILTER_ALL ? rows : rows.filter((reading) => reading.subject === filterValue);
-  }, [FILTER_ALL, currentWeek, filterValue, readingMap, recentJump.week, weeks]);
+  }, [FILTER_ALL, currentWeek, filterValue, isRoadmapReadingHidden, readingMap, recentJump.week, weeks]);
 
   const roadmapWeeks = useMemo(() => {
     if (filterValue === FILTER_ALL) return weeks;
@@ -96,14 +108,30 @@ export function WeeklyPlanScreen({
     });
   }, [FILTER_ALL, currentWeek, filterValue, readingMap, weeks]);
 
+  const hiddenRoadmapReadings = useMemo(() => {
+    const rows = Object.values(readingMap)
+      .filter((reading) => isRoadmapReadingHidden(reading.id))
+      .map((reading) => ({ reading, week: reading.weekAssigned }))
+      .sort((left, right) => left.week - right.week || left.reading.readingNumber - right.reading.readingNumber);
+    return filterValue === FILTER_ALL ? rows : rows.filter(({ reading }) => reading.subject === filterValue);
+  }, [FILTER_ALL, filterValue, isRoadmapReadingHidden, readingMap]);
+
+  function displayReadingTitle(reading: Reading) {
+    return getRoadmapReadingTitle(reading.id, reading.title);
+  }
+
   function toggleWeek(weekNumber: number) {
     setExpandedWeeks((current) => ({ ...current, [weekNumber]: !current[weekNumber] }));
   }
 
-  function renderReadingCard(reading: Reading) {
+  function renderReadingCard(reading: Reading, options?: { hiddenMode?: boolean }) {
     const expanded = expandedReadingId === reading.id;
     const dateValue = customDate[reading.id] ?? reading.lastReviewed ?? "";
     const highlighted = recentJump.readingId === reading.id;
+    const hiddenMode = Boolean(options?.hiddenMode);
+    const displayTitle = displayReadingTitle(reading);
+    const draftValue = roadmapTitleDrafts[reading.id] ?? displayTitle;
+    const editorOpen = Boolean(roadmapEditorOpen[reading.id]);
 
     return (
       <View key={reading.id} style={[styles.readingCard, highlighted && styles.readingCardHighlighted]}>
@@ -112,8 +140,9 @@ export function WeeklyPlanScreen({
             <Text style={styles.rowTitle}>
               {reading.subject} · R{reading.readingNumber}
             </Text>
-            <Text style={styles.rowMeta}>{reading.title}</Text>
+            <Text style={styles.rowMeta}>{displayTitle}</Text>
             <Text style={styles.rowMeta}>Cycle {reading.revisionCycle} · Last studied {reading.lastReviewed ? formatShortDate(reading.lastReviewed) : "Not yet"}</Text>
+            {hiddenMode ? <Text style={styles.rowMeta}>Hidden from roadmap · Originally Week {reading.weekAssigned}</Text> : null}
           </View>
           <View style={styles.statusWrap}>
             <Pressable onPress={() => cycleReadingStatus(reading.id)}>
@@ -140,7 +169,7 @@ export function WeeklyPlanScreen({
                     <Text style={styles.markRevisionButtonText}>Mark revised</Text>
                   </Pressable>
                   <Pressable style={[styles.markRevisionButton, styles.practiceButton]} onPress={() => onOpenPracticeReading(reading)}>
-                    <Text style={[styles.markRevisionButtonText, styles.practiceButtonText]}>Open practice</Text>
+                    <Text style={[styles.markRevisionButtonText, styles.practiceButtonText]}>Review quiz</Text>
                   </Pressable>
                   <Pressable style={[styles.markRevisionButton, styles.snoozeButton]} onPress={() => snoozeReview(reading.id, 1)}>
                     <Text style={[styles.markRevisionButtonText, styles.snoozeButtonText]}>Snooze 1 day</Text>
@@ -173,6 +202,72 @@ export function WeeklyPlanScreen({
                 </Pressable>
               ))}
             </View>
+
+            <Pressable
+              style={styles.editorToggle}
+              onPress={() =>
+                setRoadmapEditorOpen((current) => ({
+                  ...current,
+                  [reading.id]: !current[reading.id],
+                }))
+              }
+            >
+              <Text style={styles.sectionLabel}>Edit roadmap name</Text>
+              <Badge text={editorOpen ? "Hide" : "Show"} tone="accent" />
+            </Pressable>
+            {editorOpen ? (
+              <>
+                <TextInput
+                  value={draftValue}
+                  onChangeText={(value) => setRoadmapTitleDrafts((current) => ({ ...current, [reading.id]: value }))}
+                  onBlur={() => {
+                    const value = roadmapTitleDrafts[reading.id] ?? displayTitle;
+                    const trimmed = value.trim();
+                    renameRoadmapReading(reading.id, trimmed);
+                    setRoadmapTitleDrafts((current) => ({ ...current, [reading.id]: trimmed || displayTitle }));
+                  }}
+                  style={[uiStyles.input, styles.titleInput]}
+                  placeholder="Rename this roadmap chapter"
+                  placeholderTextColor={colors.inkSoft}
+                />
+                <View style={styles.renameRow}>
+                  <Pressable
+                    style={styles.studyButton}
+                    onPress={() => {
+                      const value = (roadmapTitleDrafts[reading.id] ?? displayTitle).trim();
+                      renameRoadmapReading(reading.id, value);
+                      setRoadmapTitleDrafts((current) => ({ ...current, [reading.id]: value || displayTitle }));
+                    }}
+                  >
+                    <Text style={styles.studyButtonText}>Save name</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.studyButton, styles.resetButtonMuted]}
+                    onPress={() => {
+                      setRoadmapTitleDrafts((current) => ({ ...current, [reading.id]: reading.title }));
+                      renameRoadmapReading(reading.id, "");
+                    }}
+                  >
+                    <Text style={styles.resetButtonTextMuted}>Use original</Text>
+                  </Pressable>
+                  {hiddenMode ? (
+                    <Pressable
+                      style={[styles.studyButton, styles.restoreButton]}
+                      onPress={() => restoreRoadmapReading(reading.id)}
+                    >
+                      <Text style={styles.restoreButtonText}>Restore</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[styles.studyButton, styles.hideButton]}
+                      onPress={() => hideRoadmapReading(reading.id)}
+                    >
+                      <Text style={styles.hideButtonText}>Hide</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </>
+            ) : null}
 
           </View>
         ) : null}
@@ -221,7 +316,7 @@ export function WeeklyPlanScreen({
 
       <Panel title={`Week ${recentJump.week || currentWeek}`} icon="today-outline">
         {currentWeekReadings.length ? (
-          currentWeekReadings.map(renderReadingCard)
+          currentWeekReadings.map((reading) => renderReadingCard(reading))
         ) : (
           <EmptyState text="No readings found in this week for the selected filter." />
         )}
@@ -230,11 +325,22 @@ export function WeeklyPlanScreen({
       <Panel title="Full roadmap" icon="map-outline">
         <Text style={styles.roadmapCopy}>
           {filterValue === FILTER_ALL
-            ? "Current week is expanded by default. Open any future week to see what is coming next without losing focus on the current plan."
+            ? "Current week is expanded by default. You can rename or hide any wrong chapter label, and restore it later from the hidden list."
             : "Showing the current week plus only the weeks where this subject appears, so the roadmap stays focused."}
         </Text>
+        <Pressable
+          style={styles.recalcButton}
+          onPress={() =>
+            Alert.alert("Recalculate roadmap", "Rebuild the roadmap weeks from the current chapter list?", [
+              { text: "Cancel", style: "cancel" },
+              { text: "Recalculate", style: "default", onPress: recalculateRoadmap },
+            ])
+          }
+        >
+          <Text style={styles.recalcButtonText}>Recalculate roadmap</Text>
+        </Pressable>
         {roadmapWeeks.map((week) => {
-          const weekReadings = week.readings.map((id) => readingMap[id]).filter(Boolean);
+          const weekReadings = week.readings.map((id) => readingMap[id]).filter(Boolean).filter((reading) => !isRoadmapReadingHidden(reading.id));
           const filteredReadings = filterValue === FILTER_ALL ? weekReadings : weekReadings.filter((reading) => reading.subject === filterValue);
           const rows = filteredReadings.length ? filteredReadings : weekReadings;
           const done = rows.filter((reading) => reading.status === "done").length;
@@ -264,7 +370,7 @@ export function WeeklyPlanScreen({
 
               {isExpanded ? (
                 rows.length ? (
-                  rows.map(renderReadingCard)
+                  rows.map((reading) => renderReadingCard(reading))
                 ) : (
                   <View style={styles.focusWrap}>
                     {(week.revisionFocus || []).map((item) => (
@@ -276,6 +382,28 @@ export function WeeklyPlanScreen({
             </View>
           );
         })}
+
+        <View style={styles.hiddenSection}>
+          <Pressable style={styles.hiddenSectionHeader} onPress={() => setHiddenSectionOpen((current) => !current)}>
+            <Text style={styles.weekTitle}>Hidden chapters</Text>
+            <View style={styles.hiddenSectionHeaderRight}>
+              <Badge text={`${hiddenRoadmapReadings.length}`} tone="neutral" />
+              <Badge text={hiddenSectionOpen ? "Hide" : "Show"} tone="accent" />
+            </View>
+          </Pressable>
+          {hiddenSectionOpen ? (
+            <>
+              <Text style={styles.hiddenSectionCopy}>
+                These chapters are hidden from the roadmap until you restore them.
+              </Text>
+              {hiddenRoadmapReadings.length ? (
+                hiddenRoadmapReadings.map(({ reading }) => renderReadingCard(reading, { hiddenMode: true }))
+              ) : (
+                <EmptyState text="No hidden chapters." />
+              )}
+            </>
+          ) : null}
+        </View>
       </Panel>
     </>
   );
@@ -308,6 +436,40 @@ const styles = StyleSheet.create({
   roadmapCopy: {
     color: colors.inkSoft,
     lineHeight: 20,
+  },
+  recalcButton: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primarySoft,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  recalcButtonText: {
+    color: colors.primary,
+    fontWeight: "800",
+  },
+  hiddenSection: {
+    gap: 12,
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  hiddenSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  hiddenSectionHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  hiddenSectionCopy: {
+    color: colors.inkSoft,
+    lineHeight: 18,
+    fontSize: 12,
   },
   weekCard: {
     backgroundColor: colors.surfaceMuted,
@@ -391,6 +553,9 @@ const styles = StyleSheet.create({
   dateInput: {
     backgroundColor: colors.surfaceMuted,
   },
+  titleInput: {
+    backgroundColor: colors.surface,
+  },
   studyButton: {
     alignSelf: "flex-start",
     backgroundColor: colors.surfaceMuted,
@@ -410,6 +575,17 @@ const styles = StyleSheet.create({
   },
   studyTodayText: {
     color: colors.primary,
+  },
+  renameRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  editorToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
   sectionLabel: {
     color: colors.ink,
@@ -490,6 +666,22 @@ const styles = StyleSheet.create({
   },
   snoozeButtonText: {
     color: colors.inkSoft,
+  },
+  hideButton: {
+    backgroundColor: "#fff2f2",
+    borderWidth: 1,
+    borderColor: "#f4b4b4",
+  },
+  hideButtonText: {
+    color: "#bc3a3a",
+  },
+  restoreButton: {
+    backgroundColor: "#eef7f1",
+    borderWidth: 1,
+    borderColor: "#c5e4ce",
+  },
+  restoreButtonText: {
+    color: "#2b7a4b",
   },
   focusWrap: {
     flexDirection: "row",

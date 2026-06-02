@@ -17,6 +17,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
   const [practiceTarget, setPracticeTarget] = useState<{ subject?: Subject; chapterTitle?: string }>({});
+  const [reviewRequest, setReviewRequest] = useState<{ subject?: Subject; chapterTitle?: string; nonce?: string }>({});
+  // Kept at the app level so the assistant answer survives switching tabs.
+  const [assistantQuestion, setAssistantQuestion] = useState("");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -51,12 +55,14 @@ export default function App() {
 
   function openWeeklyForSubject(subject: Subject) {
     study.setSelectedSubject(subject);
+    study.setWeeklySelectedSubject(subject);
     setWeeklyTarget({});
     setActiveTab("weekly");
   }
 
   function openWeeklyForReading(reading: Reading) {
     study.setSelectedSubject(reading.subject);
+    study.setWeeklySelectedSubject(reading.subject);
     study.setSelectedReadingId(reading.id);
     setWeeklyTarget({ week: reading.weekAssigned, readingId: reading.id });
     setActiveTab("weekly");
@@ -83,6 +89,11 @@ export default function App() {
 
   function openPracticeFromOverview(reading: { subject: string; title: string }) {
     setPracticeTarget({ subject: reading.subject as Subject, chapterTitle: reading.title });
+    setActiveTab("practice");
+  }
+
+  function startReviewQuiz(reading: { subject: string; title: string }) {
+    setReviewRequest({ subject: reading.subject as Subject, chapterTitle: reading.title, nonce: `${reading.title}-${Date.now()}` });
     setActiveTab("practice");
   }
 
@@ -154,9 +165,6 @@ export default function App() {
                   <Text style={styles.heroBadgeText}>CFA Study Companion</Text>
                 </View>
                 <Text style={styles.heroTitle}>Stay on track. Review at the right time.</Text>
-                <Text style={styles.heroSubtitle}>
-                  Built for a clean CFA workflow: see this week, update chapters fast, track confidence, and let review dates organize themselves.
-                </Text>
                 <View style={styles.metricRow}>
                   <MetricCard label="Week" value={`${study.currentWeek}/26`} icon="calendar-outline" />
                   <MetricCard label="Syllabus" value={`${study.syllabusProgress}%`} icon="checkmark-circle-outline" />
@@ -182,6 +190,7 @@ export default function App() {
                 }}
                 onOpenStudyReading={openWeeklyFromOverview}
                 onMarkReviewUpdated={study.markReviewUpdated}
+                onStartReviewQuiz={startReviewQuiz}
               />
             ) : null}
             {activeTab === "overview" ? (
@@ -217,14 +226,20 @@ export default function App() {
                 currentWeek={study.currentWeek}
                 weeks={study.studyState.weeks}
                 readingMap={study.readingMap}
-                selectedSubject={study.studyState.selectedSubject}
-                setSelectedSubject={study.setSelectedSubject}
+                getRoadmapReadingTitle={study.getDisplayReadingTitle}
+                isRoadmapReadingHidden={study.isRoadmapReadingHidden}
+                renameRoadmapReading={study.renameRoadmapReading}
+                hideRoadmapReading={study.hideRoadmapReading}
+                restoreRoadmapReading={study.restoreRoadmapReading}
+                recalculateRoadmap={study.recalculateRoadmap}
+                selectedSubject={study.studyState.weeklySelectedSubject}
+                setSelectedSubject={study.setWeeklySelectedSubject}
                 cycleReadingStatus={study.cycleReadingStatus}
                 setReadingStudyDate={study.setReadingStudyDate}
                 setReadingConfidence={study.setReadingConfidence}
                 markReviewUpdated={study.markReviewUpdated}
                 snoozeReview={study.snoozeReview}
-                onOpenPracticeReading={openPracticeForReading}
+                onOpenPracticeReading={startReviewQuiz}
                 resetSubjectForRevision={study.resetSubjectForRevision}
                 resetAllForRevision={study.resetAllForRevision}
                 targetWeek={weeklyTarget.week}
@@ -237,6 +252,7 @@ export default function App() {
               <ProgressScreen
                 subjectStats={study.subjectStats}
                 readings={study.studyState.readings}
+                uploads={study.studyState.uploads}
                 onOpenSubject={openWeeklyForSubject}
                 onOpenReading={openWeeklyForReading}
               />
@@ -271,6 +287,12 @@ export default function App() {
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}
                   onConsumeTarget={clearPracticeTarget}
+                  reviewRequest={reviewRequest}
+                  onCompleteReview={study.completeReviewForReading}
+                  assistantQuestion={assistantQuestion}
+                  setAssistantQuestion={setAssistantQuestion}
+                  assistantAnswer={assistantAnswer}
+                  setAssistantAnswer={setAssistantAnswer}
                 />
               </>
             ) : null}
@@ -378,11 +400,6 @@ const styles = StyleSheet.create({
     lineHeight: 33,
     fontWeight: "800",
     color: colors.ink,
-  },
-  heroSubtitle: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.inkSoft,
   },
   metricRow: {
     flexDirection: "row",
