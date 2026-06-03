@@ -163,6 +163,8 @@ export interface PracticeChapter {
   calculatorGuidance: string[];
   sourceCoverageGaps: string[];
   questions: PracticeQuestion[];
+  notesExcerpt?: string;
+  questionExcerpt?: string;
 }
 
 export interface PracticeHistoryEntry {

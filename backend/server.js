@@ -503,62 +503,54 @@ app.post(
 
       console.log("[parse-materials]", JSON.stringify(syncDebug));
 
-      const compactNotes = sampleTextAcrossDocument(notesText, 14000, 2);
-      const compactQuestionBank = sampleTextAcrossDocument(questionBankText, 52000, 6);
+      const compactNotes = sampleTextAcrossDocument(notesText, 12000, 3);
+      const compactQuestionBank = sampleTextAcrossDocument(questionBankText, 16000, 4);
 
-      const response = await runClaude({
-        model: MODELS.parse,
-        maxTokens: 16000,
-        forceJson: true,
-        system:
-          `You are helping organize CFA Level I practice materials for ${subject}. ` +
-          "You will receive a pre-parsed chapter scaffold from the notes PDF and supporting text from the question-bank PDF. " +
-          "Do not invent or rename the chapter map when a scaffold is supplied. Keep one output chapter per scaffold chapter. " +
-          "Instead, write a concise notes summary for each chapter, list the exact concepts or formulas to revise, preserve the provided LOS checklist from the notes when available, and include up to 5 representative source questions per chapter. " +
-          "Also extract key subtopics that must not be forgotten, the main formulas, common traps, the style/pattern of questions that appear, and where the BA II Plus financial calculator is useful. " +
-          "Return strict JSON with this shape: " +
-          `{"subject":"", "chapters":[{"readingTitle":"","notesSummary":"","losChecklist":[],"revisionFocus":[],"keySubtopics":[],"formulas":[],"commonTraps":[],"questionPatterns":[],"calculatorGuidance":[],"sourceCoverageGaps":[],"questions":[{"question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}]}. ` +
-          "Keep explanations to one short sentence max. Keep notesSummary dense and useful. If answers are not available, leave answer as an empty string. Do not use markdown.",
-        userText: JSON.stringify({
-          subject,
-          chapterScaffold: mergedModules.map((module) => ({
-            readingTitle: module.readingTitle,
-            losChecklist: module.losChecklist,
-            notesExcerpt: sampleTextAcrossDocument(module.notesExcerpt, 7000, 1),
-            questionBankExcerpt: sampleTextAcrossDocument(module.questionExcerpt, 9000, 1),
-          })),
-          fallbackNotesExcerpt: compactNotes,
-          fallbackQuestionBankExcerpt: compactQuestionBank,
-        }),
-      });
+      // Fast, AI-free scaffold: build chapters directly from the regex-parsed modules.
+      // The heavy per-chapter work (summaries, questions) is deferred to generation
+      // time, which reads the raw excerpts stored here. This keeps Sync to a short,
+      // reliable request instead of one long blocking AI call that drops connections.
+      const emptyChapterFields = {
+        notesSummary: "",
+        revisionFocus: [],
+        keySubtopics: [],
+        formulas: [],
+        commonTraps: [],
+        questionPatterns: [],
+        calculatorGuidance: [],
+        sourceCoverageGaps: [],
+        questions: [],
+      };
 
-      const structured = parseStructuredOutput(response.text);
-      if (structured?.chapters?.length) {
-        const enrichedChapters = await Promise.all(
-          structured.chapters.map(async (chapter) => {
-            const officialEntry = await findOfficialLosForReading(subject, chapter?.readingTitle || "");
-            const scaffoldMatch = mergedModules.find((module) => module.normalizedTitle === normalizeModuleTitle(chapter?.readingTitle || ""));
-            return {
-              ...chapter,
-              readingTitle: scaffoldMatch?.readingTitle || chapter?.readingTitle || "",
-              losChecklist:
-                (Array.isArray(scaffoldMatch?.losChecklist) && scaffoldMatch.losChecklist.length
-                  ? scaffoldMatch.losChecklist
-                  : officialEntry?.los) || (Array.isArray(chapter?.losChecklist) ? chapter.losChecklist : []),
-            };
-          }),
-        );
-        structured.chapters = enrichedChapters;
+      const chapters = mergedModules.map((module) => ({
+        readingTitle: module.readingTitle,
+        losChecklist: Array.isArray(module.losChecklist) ? module.losChecklist.filter(Boolean) : [],
+        ...emptyChapterFields,
+        notesExcerpt: sampleTextAcrossDocument(module.notesExcerpt, 6000, 1),
+        questionExcerpt: sampleTextAcrossDocument(module.questionExcerpt, 8000, 1),
+      }));
+
+      // Fallback for PDFs whose chapters the parser couldn't detect: one catch-all
+      // chapter holding the sampled text, so generation still has material to work with.
+      if (!chapters.length) {
+        chapters.push({
+          readingTitle: `${subject} — all material`,
+          losChecklist: [],
+          ...emptyChapterFields,
+          notesExcerpt: compactNotes,
+          questionExcerpt: compactQuestionBank,
+        });
       }
+
+      const structured = { subject, chapters };
 
       res.json({
         ok: true,
         subject,
-        model: MODELS.parse,
+        model: "fast-parse (no AI)",
         release: BACKEND_RELEASE,
         syncDebug,
-        output_text: structured ? JSON.stringify(structured) : response.text,
-        raw: response.raw,
+        output_text: JSON.stringify(structured),
       });
     } catch (error) {
       console.error(error);
@@ -659,6 +651,7 @@ app.post("/api/generate-practice-set", async (req, res) => {
       system:
         "You create CFA Level I chapter-wise practice sets from provided source material. " +
         "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, key subtopics, formulas, common traps, question patterns, calculator guidance, and example questions. " +
+        "When those structured fields are empty, treat the chapter's notesExcerpt and questionExcerpt as the authoritative source material and base the questions on them. " +
         "Return strict JSON only with this shape: " +
         '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
         "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +

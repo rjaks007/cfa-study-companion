@@ -95,6 +95,8 @@ function normalizeParsedChapters(value: unknown): PracticeChapter[] {
           ? chapter.sourceCoverageGaps.map((item: unknown) => String(item).trim()).filter(Boolean)
           : [],
         questions,
+        notesExcerpt: typeof chapter?.notesExcerpt === "string" ? chapter.notesExcerpt : "",
+        questionExcerpt: typeof chapter?.questionExcerpt === "string" ? chapter.questionExcerpt : "",
       };
     })
     .filter(Boolean) as PracticeChapter[];
@@ -1280,7 +1282,7 @@ export function useStudyCompanion() {
                 lastSyncAt: todayISO(),
                 chaptersDetected: chapterCount,
                 uploadStatus: "Parsed with AI",
-                aiSummary: payload.output_text || "",
+                aiSummary: "",
                 aiError: "",
                 parsedChapters,
                 userAnswers: {},
@@ -1439,8 +1441,8 @@ export function useStudyCompanion() {
         chapterTitle,
         questionCount,
         difficulty,
-        parsedChapters: upload.parsedChapters,
-        aiSummary: upload.aiSummary,
+        parsedChapters: upload.parsedChapters.filter((chapter) => chapter.readingTitle === chapterTitle),
+        aiSummary: "",
         mode: options?.mode || "standard",
         focusTopics: options?.focusTopics || [],
         baseQuestions: options?.baseQuestions || [],
