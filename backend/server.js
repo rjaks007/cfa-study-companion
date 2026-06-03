@@ -604,8 +604,8 @@ app.post("/api/study-chat", async (req, res) => {
         "Treat earlier turns as context and answer follow-ups naturally (e.g. 'explain more', 'give an example') without repeating yourself. " +
         "Assume the student uses the BA II Plus financial calculator in the exam. When a numerical topic benefits from it, say where and how the calculator is useful. " +
         "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
-        "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
-        "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
+        "Format for easy reading: put a short heading for each topic on its own line wrapped in double asterisks like **Heading**, then the explanation below it. Use '- ' at the start of a line for bullet points. Keep paragraphs short. Do not use tables, code fences, or '#' headings. " +
+        "If formulas are needed, put each one on its own line, written plainly such as 'Future value = Present value × (1 + r)^n'. " +
         "When helpful, explain why the student's choice was wrong and what concept it confused. " +
         "End with a short 'Revise next:' line only when useful.",
       messages: [...priorTurns, finalTurn],
@@ -620,6 +620,44 @@ app.post("/api/study-chat", async (req, res) => {
     console.error(error);
     res.status(500).json({
       error: "Failed to answer study assistant question.",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/generate-flashcards", async (req, res) => {
+  try {
+    const { subject = "Unknown subject", chapterTitle = "", chapter = null } = req.body || {};
+    if (!String(chapterTitle).trim() || !chapter) {
+      return res.status(400).json({ error: "chapterTitle and chapter are required." });
+    }
+
+    const response = await runClaude({
+      model: MODELS.chat,
+      maxTokens: 4000,
+      forceJson: true,
+      system:
+        "You create CFA Level I study flashcards from the supplied chapter material. " +
+        'Return strict JSON only: {"flashcards":[{"front":"","back":"","cardType":"Formula"}]}. ' +
+        "cardType must be one of: Formula, Concept, Application, Trap. " +
+        "Put ALL the key formulas FIRST as Formula cards — front = the name and when to use it, back = the formula written plainly plus a one-line note. " +
+        "Then add the highest-yield Concept, Application and Trap cards. " +
+        "Front is a short question or cue; back is a concise, exam-useful answer. Mention BA II Plus usage on the back when it helps. " +
+        "Base everything strictly on the supplied material and do not invent. Aim for 8 to 16 cards total. Do not use markdown.",
+      userText: JSON.stringify({ subject, chapterTitle, chapter }),
+    });
+
+    const structured = parseStructuredOutput(response.text);
+    const flashcards = Array.isArray(structured?.flashcards) ? structured.flashcards : [];
+    if (!flashcards.length) {
+      return res.status(500).json({ error: "No flashcards were generated.", details: "AI returned no usable cards." });
+    }
+
+    res.json({ ok: true, flashcards });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Failed to generate flashcards.",
       details: error instanceof Error ? error.message : "Unknown error",
     });
   }

@@ -2,13 +2,62 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
 import { colors } from "../theme";
-import { PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
+import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
 import { buildTopicCoverage } from "../utils/coverage";
 
-type PracticeSection = "generate" | "saved" | "review" | "assistant";
+type PracticeSection = "generate" | "saved" | "review" | "assistant" | "cards";
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
 const ASSISTANT_FOLLOW_UPS = ["Explain more simply", "Give a numerical example", "What are the common mistakes here?"];
+
+// Renders inline **bold** spans within a line of assistant text.
+function renderInline(text: string, keyPrefix: string) {
+  const parts = text.split(/\*\*(.+?)\*\*/g); // odd indices are the bold segments
+  return parts.map((part, index) =>
+    index % 2 === 1 ? (
+      <Text key={`${keyPrefix}-b${index}`} style={styles.assistantBold}>
+        {part}
+      </Text>
+    ) : (
+      <Text key={`${keyPrefix}-t${index}`}>{part}</Text>
+    ),
+  );
+}
+
+// Lightweight formatter: bold **headings**, "- " bullets, and paragraph spacing,
+// so the assistant's answers are scannable instead of one flat block.
+function FormattedAnswer({ content }: { content: string }) {
+  const lines = content.split(/\n/).map((line) => line.trim());
+  return (
+    <View style={styles.answerWrap}>
+      {lines.map((line, index) => {
+        if (!line) return null;
+        const heading = line.match(/^\*\*(.+?)\*\*:?$/);
+        if (heading) {
+          return (
+            <Text key={`h-${index}`} style={styles.answerHeading}>
+              {heading[1]}
+            </Text>
+          );
+        }
+        const bullet = line.match(/^[-•*]\s+(.*)$/);
+        if (bullet) {
+          return (
+            <View key={`bl-${index}`} style={styles.answerBulletRow}>
+              <Text style={styles.answerBulletDot}>•</Text>
+              <Text style={styles.assistantText}>{renderInline(bullet[1], `bl-${index}`)}</Text>
+            </View>
+          );
+        }
+        return (
+          <Text key={`p-${index}`} style={styles.assistantText}>
+            {renderInline(line, `p-${index}`)}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
 
 function normalizeDifficultyLabel(value: PracticeDifficulty) {
   if (value === "1") return "Foundational";
@@ -76,6 +125,11 @@ export function PracticeScreen({
   setSelectedSubject,
   selectedChapter,
   setSelectedChapter,
+  flashcards,
+  generateChapterFlashcards,
+  addChapterCard,
+  reviewChapterCard,
+  deleteFlashcard,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -118,6 +172,11 @@ export function PracticeScreen({
   setSelectedSubject: React.Dispatch<React.SetStateAction<Subject | null>>;
   selectedChapter: string;
   setSelectedChapter: React.Dispatch<React.SetStateAction<string>>;
+  flashcards: Flashcard[];
+  generateChapterFlashcards: (subject: Subject, chapterTitle: string) => Promise<number>;
+  addChapterCard: (subject: Subject, chapterTitle: string, front: string, back: string, cardType?: Flashcard["cardType"]) => void;
+  reviewChapterCard: (cardId: string, rating: FlashcardRating) => void;
+  deleteFlashcard: (cardId: string) => void;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [questionCount, setQuestionCount] = useState("10");
@@ -138,6 +197,11 @@ export function PracticeScreen({
   const [submitted, setSubmitted] = useState(false);
   const [guessed, setGuessed] = useState<Record<string, boolean>>({});
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [revealedCards, setRevealedCards] = useState<Record<string, boolean>>({});
+  const [cardFront, setCardFront] = useState("");
+  const [cardBack, setCardBack] = useState("");
+  const [makingCards, setMakingCards] = useState(false);
+  const [showAddCard, setShowAddCard] = useState(false);
   const [reviewContext, setReviewContext] = useState<{ subject: Subject; chapterTitle: string } | null>(null);
   const [reviewScheduled, setReviewScheduled] = useState(false);
   const handledReviewNonce = useRef("");
@@ -207,6 +271,10 @@ export function PracticeScreen({
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
   const chapterCoverage = useMemo(() => buildTopicCoverage(activeUpload || undefined, selectedChapter), [activeUpload, selectedChapter]);
   const activeReading = readings.find((reading) => reading.subject === selectedSubject && reading.title === selectedChapter) || null;
+  const chapterCards = useMemo(
+    () => flashcards.filter((card) => card.topic === selectedSubject && card.readingTitle === selectedChapter),
+    [flashcards, selectedSubject, selectedChapter],
+  );
   const wrongGeneratedQuestions = activeUpload?.generatedSet
     ? activeUpload.generatedSet.questions.filter((question) => {
         const selected = activeUpload.generatedAnswers[question.id];
@@ -401,6 +469,32 @@ export function PracticeScreen({
     void startReviewQuiz(selectedSubject, selectedChapter);
   }
 
+  async function handleMakeCards() {
+    if (!selectedSubject || !selectedChapter) return;
+    try {
+      setMakingCards(true);
+      const count = await generateChapterFlashcards(selectedSubject, selectedChapter);
+      Alert.alert("Flashcards ready", `Added ${count} cards for ${selectedChapter}.`);
+    } catch (error) {
+      Alert.alert("Couldn't make cards", error instanceof Error ? error.message : "Flashcard generation failed.");
+    } finally {
+      setMakingCards(false);
+    }
+  }
+
+  function handleAddCard() {
+    if (!selectedSubject || !selectedChapter || !cardFront.trim() || !cardBack.trim()) return;
+    addChapterCard(selectedSubject, selectedChapter, cardFront, cardBack);
+    setCardFront("");
+    setCardBack("");
+    setShowAddCard(false);
+  }
+
+  function handleRateCard(cardId: string, rating: FlashcardRating) {
+    reviewChapterCard(cardId, rating);
+    setRevealedCards((current) => ({ ...current, [cardId]: false }));
+  }
+
   function handleSaveCurrentSet() {
     if (!selectedSubject || !activeUpload?.generatedSet) return;
     saveCurrentPracticeSet(selectedSubject);
@@ -435,6 +529,7 @@ export function PracticeScreen({
         {sectionButton("generate", "Generate")}
         {sectionButton("saved", "Saved")}
         {sectionButton("review", "Review")}
+        {sectionButton("cards", "Cards")}
         {sectionButton("assistant", "Assistant")}
       </View>
 
@@ -1008,7 +1103,7 @@ export function PracticeScreen({
                       style={[styles.chatBubble, message.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}
                     >
                       <Text style={styles.chatRole}>{message.role === "user" ? "You" : "Assistant"}</Text>
-                      <Text style={message.role === "user" ? styles.chatTextUser : styles.assistantText}>{message.content}</Text>
+                      {message.role === "user" ? <Text style={styles.chatTextUser}>{message.content}</Text> : <FormattedAnswer content={message.content} />}
                     </View>
                   ))}
                   {assistantLoading ? <Text style={styles.metaText}>Thinking…</Text> : null}
@@ -1043,6 +1138,75 @@ export function PracticeScreen({
                   onPress={() => void askAssistant(assistantQuestion)}
                 />
               </View>
+            </>
+          ) : (
+            <EmptyState text="Sync a subject with AI first." />
+          )}
+        </Panel>
+      ) : null}
+
+      {activeSection === "cards" ? (
+        <Panel title="Flashcards" icon="albums-outline">
+          {selectedSubject ? (
+            <>
+              <Text style={styles.copy}>Formula and concept cards for {selectedChapter || selectedSubject}. Flip a card, rate how well you knew it, and it comes back on a spaced schedule.</Text>
+              <View style={styles.inlineRow}>
+                <ActionButton
+                  label={makingCards ? "Making cards..." : "Auto-make cards (formulas first)"}
+                  icon="sparkles-outline"
+                  onPress={() => void handleMakeCards()}
+                />
+                <ActionButton label={showAddCard ? "Close" : "Add a card"} icon="add-outline" onPress={() => setShowAddCard((current) => !current)} compact />
+              </View>
+
+              {showAddCard ? (
+                <View style={styles.configCard}>
+                  <Text style={styles.sectionLabel}>Front (question / cue)</Text>
+                  <TextInput value={cardFront} onChangeText={setCardFront} style={uiStyles.input} placeholder="e.g. Future value of an ordinary annuity?" placeholderTextColor={colors.inkSoft} multiline />
+                  <Text style={styles.sectionLabel}>Back (answer)</Text>
+                  <TextInput value={cardBack} onChangeText={setCardBack} style={[uiStyles.input, styles.chatInput]} placeholder="The formula or fact…" placeholderTextColor={colors.inkSoft} multiline />
+                  <ActionButton label="Save card" icon="checkmark-outline" onPress={handleAddCard} compact />
+                </View>
+              ) : null}
+
+              {chapterCards.length ? (
+                <View style={styles.stack}>
+                  {chapterCards.map((card) => {
+                    const revealed = Boolean(revealedCards[card.id]);
+                    return (
+                      <View key={card.id} style={styles.questionCard}>
+                        <View style={styles.badgeWrap}>
+                          <Badge text={card.cardType} tone={card.cardType === "Formula" ? "warning" : card.cardType === "Trap" ? "danger" : "primary"} />
+                          {card.reps > 0 ? <Badge text={`Seen ${card.reps}×`} tone="neutral" /> : <Badge text="New" tone="accent" />}
+                        </View>
+                        <Text style={styles.questionTitle}>{card.front}</Text>
+                        {revealed ? (
+                          <>
+                            <View style={styles.feedbackCard}>
+                              <Text style={styles.feedbackLine}>{card.back}</Text>
+                            </View>
+                            <Text style={styles.sectionLabel}>How well did you know it?</Text>
+                            <View style={styles.inlineRow}>
+                              {(["again", "hard", "good", "easy"] as FlashcardRating[]).map((rating) => (
+                                <Pressable key={rating} style={styles.levelChip} onPress={() => handleRateCard(card.id, rating)}>
+                                  <Text style={styles.levelChipText}>{rating === "again" ? "Again" : rating === "hard" ? "Hard" : rating === "good" ? "Good" : "Easy"}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          </>
+                        ) : (
+                          <View style={styles.inlineRow}>
+                            <ActionButton label="Show answer" icon="eye-outline" onPress={() => setRevealedCards((current) => ({ ...current, [card.id]: true }))} compact />
+                            <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteFlashcard(card.id)} compact />
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <EmptyState text="No cards yet. Tap 'Auto-make cards' to build a deck for this chapter." />
+              )}
             </>
           ) : (
             <EmptyState text="Sync a subject with AI first." />
@@ -1397,6 +1561,33 @@ const styles = StyleSheet.create({
   assistantText: {
     color: colors.ink,
     lineHeight: 21,
+  },
+  answerWrap: {
+    gap: 6,
+  },
+  answerHeading: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 14,
+    marginTop: 4,
+  },
+  answerBold: {
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  assistantBold: {
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  answerBulletRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingLeft: 4,
+  },
+  answerBulletDot: {
+    color: colors.primary,
+    lineHeight: 21,
+    fontWeight: "800",
   },
   assistantHeaderRow: {
     flexDirection: "row",

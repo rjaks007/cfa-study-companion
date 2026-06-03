@@ -289,6 +289,11 @@ export default function App() {
                   savePracticeQuestion={study.savePracticeQuestion}
                   deleteSavedQuestion={study.deleteSavedQuestion}
                   analyzeGeneratedPractice={study.analyzeGeneratedPractice}
+                  flashcards={study.studyState.cards}
+                  generateChapterFlashcards={study.generateChapterFlashcards}
+                  addChapterCard={study.addChapterCard}
+                  reviewChapterCard={study.reviewChapterCard}
+                  deleteFlashcard={study.deleteFlashcard}
                   onRequestFocusBottomField={scrollPracticeBottomIntoView}
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}

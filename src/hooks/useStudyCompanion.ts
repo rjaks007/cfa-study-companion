@@ -10,6 +10,7 @@ import {
   ChapterQuestionSummary,
   Flashcard,
   FlashcardRating,
+  FlashcardType,
   GeneratedPracticeReview,
   GeneratedPracticeSet,
   PracticeChapter,
@@ -1193,6 +1194,90 @@ export function useStudyCompanion() {
     }));
   }
 
+  function normalizeCardType(value: unknown): FlashcardType {
+    const text = String(value || "").toLowerCase();
+    if (text.startsWith("form")) return "Formula";
+    if (text.startsWith("app")) return "Application";
+    if (text.startsWith("trap")) return "Trap";
+    return "Concept";
+  }
+
+  function newChapterCard(subject: Subject, chapterTitle: string, front: string, back: string, cardType: FlashcardType): Flashcard {
+    const reading = studyState.readings.find((item) => item.subject === subject && item.title === chapterTitle);
+    return {
+      id: makeId("card"),
+      deck: chapterTitle,
+      topic: subject,
+      readingId: reading?.id || `${subject}__chapter`,
+      readingTitle: chapterTitle,
+      front: front.trim(),
+      back: back.trim(),
+      difficulty: 3,
+      lastReviewed: "",
+      nextReview: todayISO(),
+      interval: 0,
+      ease: 2.5,
+      reps: 0,
+      status: "new",
+      cardType,
+      suspended: false,
+    };
+  }
+
+  // AI-generate a chapter's flashcards (formulas first, then key concepts/traps).
+  async function generateChapterFlashcards(subject: Subject, chapterTitle: string) {
+    const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
+    if (!backendBaseUrl) throw new Error("Add your backend URL first.");
+    const upload = studyState.uploads.find((item) => item.subject === subject);
+    const chapter = upload?.parsedChapters.find((item) => item.readingTitle === chapterTitle);
+    if (!chapter) throw new Error("Sync this subject and pick a chapter first.");
+
+    const response = await fetch(`${backendBaseUrl}/api/generate-flashcards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject,
+        chapterTitle,
+        chapter: {
+          readingTitle: chapter.readingTitle,
+          losChecklist: chapter.losChecklist,
+          notesExcerpt: chapter.notesExcerpt || "",
+          questionExcerpt: chapter.questionExcerpt || "",
+        },
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.details || payload?.error || "Failed to make flashcards.");
+
+    const made = Array.isArray(payload.flashcards) ? payload.flashcards : [];
+    const newCards = made
+      .map((card: any) => newChapterCard(subject, chapterTitle, String(card?.front || ""), String(card?.back || ""), normalizeCardType(card?.cardType)))
+      .filter((card: Flashcard) => card.front && card.back);
+
+    if (!newCards.length) throw new Error("No usable flashcards came back.");
+
+    setStudyState((current) => ({ ...current, cards: [...newCards, ...current.cards] }));
+    return newCards.length;
+  }
+
+  function addChapterCard(subject: Subject, chapterTitle: string, front: string, back: string, cardType: FlashcardType = "Concept") {
+    if (!front.trim() || !back.trim()) return;
+    const card = newChapterCard(subject, chapterTitle, front, back, cardType);
+    setStudyState((current) => ({ ...current, cards: [card, ...current.cards] }));
+  }
+
+  function reviewChapterCard(cardId: string, rating: FlashcardRating) {
+    setStudyState((current) => ({
+      ...current,
+      cards: current.cards.map((card) => (card.id === cardId ? calculateCardUpdate(card, rating) : card)),
+    }));
+  }
+
+  function deleteFlashcard(cardId: string) {
+    setStudyState((current) => ({ ...current, cards: current.cards.filter((card) => card.id !== cardId) }));
+  }
+
   function updateMock(index: number, patch: Partial<StoredState["mocks"][number]>) {
     setStudyState((current) => ({
       ...current,
@@ -1944,6 +2029,10 @@ export function useStudyCompanion() {
     savePracticeQuestion,
     deleteSavedQuestion,
     analyzeGeneratedPractice,
+    generateChapterFlashcards,
+    addChapterCard,
+    reviewChapterCard,
+    deleteFlashcard,
     exportBackup,
     importBackup,
   };
