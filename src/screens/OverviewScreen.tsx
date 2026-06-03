@@ -32,6 +32,9 @@ export function OverviewScreen({
   onMarkReviewUpdated,
   onStartReviewQuiz,
   studyNext,
+  studyGarden,
+  dueCardCount,
+  onStartDailyCards,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTodayReadings: ReadingItem[];
@@ -46,6 +49,9 @@ export function OverviewScreen({
   onMarkReviewUpdated: (readingId: string) => void;
   onStartReviewQuiz: (reading: { subject: string; title: string }) => void;
   studyNext: StudyNextItem[];
+  studyGarden: { streak: number; stage: string; weekDots: { iso: string; active: boolean }[]; bloomCount: number; progress: number; toNextBloom: number };
+  dueCardCount: number;
+  onStartDailyCards: () => void;
 }) {
   const [studyNextOpen, setStudyNextOpen] = useState(false);
   const reviewsDue = [
@@ -55,24 +61,44 @@ export function OverviewScreen({
 
   return (
     <>
-      <Panel title="Today" icon="sunny-outline">
-        <View style={styles.summaryCard}>
-          <Text style={styles.sectionTitle}>This week completion</Text>
-          <ProgressBar progress={weekProgress.percent} />
-          <Text style={styles.metaText}>
-            {weekProgress.done}/{weekProgress.total || 0} readings done this week
-          </Text>
+      <View style={styles.gardenCard}>
+        <View style={styles.gardenTop}>
+          <View style={styles.flex}>
+            <Text style={styles.gardenStreak}>🔥 {studyGarden.streak}-day streak</Text>
+            <Text style={styles.gardenSub}>
+              {studyGarden.streak === 0
+                ? "Study today to plant your first sprout 🌱"
+                : studyGarden.toNextBloom >= 7
+                  ? "Fresh sprout — keep the streak going 🌱"
+                  : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to your next bloom`}
+            </Text>
+          </View>
+          <Text style={styles.gardenPlant}>{studyGarden.stage}</Text>
         </View>
 
-        <View style={styles.actionRow}>
-          <Pressable style={styles.primaryButton} onPress={onOpenWeekly}>
-            <Text style={styles.primaryButtonText}>Open weekly plan</Text>
-          </Pressable>
-          <Pressable style={styles.secondaryButton} onPress={() => void onEnableNotifications()}>
-            <Text style={styles.secondaryButtonText}>{notificationsEnabled ? "Reminders on" : "Enable reminders"}</Text>
-          </Pressable>
+        <ProgressBar progress={studyGarden.progress} />
+
+        <View style={styles.weekDotsRow}>
+          {studyGarden.weekDots.map((dot) => (
+            <View key={dot.iso} style={[styles.weekDot, dot.active && styles.weekDotActive]} />
+          ))}
         </View>
-      </Panel>
+
+        {studyGarden.bloomCount ? (
+          <View style={styles.gardenFlowersRow}>
+            <Text style={styles.gardenFlowers}>
+              {Array.from({ length: Math.min(studyGarden.bloomCount, 14) })
+                .map((_, index) => ["🌷", "🌻", "🌸", "🌼", "🌹"][index % 5])
+                .join(" ")}
+            </Text>
+            {studyGarden.bloomCount > 14 ? <Text style={styles.metaText}>+{studyGarden.bloomCount - 14}</Text> : null}
+          </View>
+        ) : null}
+
+        <Pressable onPress={() => void onEnableNotifications()}>
+          <Text style={styles.gardenReminders}>{notificationsEnabled ? "Daily reminders on ✓" : "Enable daily reminders"}</Text>
+        </Pressable>
+      </View>
 
       <Panel title="Reviews due" icon="notifications-outline">
         <Text style={styles.purpose}>Spaced reviews — keep what you've already learned from fading.</Text>
@@ -103,6 +129,15 @@ export function OverviewScreen({
           <EmptyState text="No reviews due. You're caught up." />
         )}
       </Panel>
+
+      {dueCardCount ? (
+        <Panel title="Cards due today" icon="albums-outline">
+          <Text style={styles.purpose}>A quick spaced-repetition session — formulas and key facts.</Text>
+          <Pressable style={styles.cardsDueButton} onPress={onStartDailyCards}>
+            <Text style={styles.cardsDueText}>Review {Math.min(dueCardCount, 15)} card{Math.min(dueCardCount, 15) > 1 ? "s" : ""}</Text>
+          </Pressable>
+        </Panel>
+      ) : null}
 
       <Panel title="This week's chapters" icon="book-outline">
         <Text style={styles.purpose}>New material on your plan for this week — your main learning.</Text>
@@ -222,6 +257,73 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginBottom: 2,
+  },
+  gardenCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 12,
+  },
+  gardenTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  gardenStreak: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 18,
+  },
+  gardenSub: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  gardenPlant: {
+    fontSize: 40,
+  },
+  weekDotsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  weekDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  weekDotActive: {
+    backgroundColor: colors.success,
+    borderColor: colors.success,
+  },
+  gardenFlowersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  gardenFlowers: {
+    fontSize: 18,
+    flex: 1,
+  },
+  gardenReminders: {
+    color: colors.primary,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  cardsDueButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  cardsDueText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 14,
   },
   priorityTitle: {
     color: colors.ink,

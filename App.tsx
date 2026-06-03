@@ -25,6 +25,7 @@ export default function App() {
   // Kept at the app level so the Practice tab remembers your subject/chapter across tabs.
   const [practiceSubject, setPracticeSubject] = useState<Subject | null>(null);
   const [practiceChapter, setPracticeChapter] = useState("");
+  const [dailyCardsRequest, setDailyCardsRequest] = useState<{ nonce?: string }>({});
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -32,6 +33,15 @@ export default function App() {
   const study = useStudyCompanion();
   const tabIndex = TABS.findIndex((tab) => tab.id === activeTab);
   const studyNext = useMemo(() => buildStudyNext(study.studyState.uploads), [study.studyState.uploads]);
+  const dueCardCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return study.studyState.cards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today)).length;
+  }, [study.studyState.cards]);
+
+  function startDailyCards() {
+    setDailyCardsRequest({ nonce: `daily-${Date.now()}` });
+    setActiveTab("practice");
+  }
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
@@ -186,6 +196,9 @@ export default function App() {
                 onMarkReviewUpdated={study.markReviewUpdated}
                 onStartReviewQuiz={startReviewQuiz}
                 studyNext={studyNext}
+                studyGarden={study.studyGarden}
+                dueCardCount={dueCardCount}
+                onStartDailyCards={startDailyCards}
               />
             ) : null}
             {activeTab === "overview" ? (
@@ -283,6 +296,7 @@ export default function App() {
                   addChapterCard={study.addChapterCard}
                   reviewChapterCard={study.reviewChapterCard}
                   deleteFlashcard={study.deleteFlashcard}
+                  dailyCardsRequest={dailyCardsRequest}
                   onRequestFocusBottomField={scrollPracticeBottomIntoView}
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}

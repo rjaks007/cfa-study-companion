@@ -130,6 +130,7 @@ export function PracticeScreen({
   addChapterCard,
   reviewChapterCard,
   deleteFlashcard,
+  dailyCardsRequest,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -177,6 +178,7 @@ export function PracticeScreen({
   addChapterCard: (subject: Subject, chapterTitle: string, front: string, back: string, cardType?: Flashcard["cardType"]) => void;
   reviewChapterCard: (cardId: string, rating: FlashcardRating) => void;
   deleteFlashcard: (cardId: string) => void;
+  dailyCardsRequest?: { nonce?: string };
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [questionCount, setQuestionCount] = useState("10");
@@ -202,6 +204,7 @@ export function PracticeScreen({
   const [cardBack, setCardBack] = useState("");
   const [makingCards, setMakingCards] = useState(false);
   const [showAddCard, setShowAddCard] = useState(false);
+  const [showBrowseCards, setShowBrowseCards] = useState(false);
   const [reviewingCards, setReviewingCards] = useState(false);
   const [cardQueue, setCardQueue] = useState<Flashcard[]>([]);
   const [cardIndex, setCardIndex] = useState(0);
@@ -270,6 +273,17 @@ export function PracticeScreen({
     void startReviewQuiz(subject, chapterTitle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewRequest?.nonce]);
+
+  // When the Overview "Daily cards" button is tapped, start a global card session.
+  const handledDailyNonce = useRef("");
+  useEffect(() => {
+    const nonce = dailyCardsRequest?.nonce;
+    if (!nonce || handledDailyNonce.current === nonce) return;
+    handledDailyNonce.current = nonce;
+    const today = new Date().toISOString().slice(0, 10);
+    beginCardSession(flashcards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dailyCardsRequest?.nonce]);
 
   const generatedStats = useMemo(() => (activeUpload ? generatedSummary(activeUpload) : { total: 0, answered: 0, correct: 0, wrong: 0, accuracy: 0 }), [activeUpload]);
   const activeParsedChapter = activeUpload?.parsedChapters.find((chapter) => chapter.readingTitle === selectedChapter) || null;
@@ -503,18 +517,23 @@ export function PracticeScreen({
     setRevealedCards((current) => ({ ...current, [cardId]: false }));
   }
 
-  // Anki-style one-at-a-time review session over the chapter's due cards.
-  function startCardReview() {
-    const today = new Date().toISOString().slice(0, 10);
-    const due = chapterCards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today));
-    if (!due.length) {
-      Alert.alert("All caught up", "No cards are due for this chapter right now.");
+  // Anki-style one-at-a-time review session, capped at 15 cards per session.
+  function beginCardSession(cards: Flashcard[]) {
+    const queue = cards.slice(0, 15);
+    if (!queue.length) {
+      Alert.alert("All caught up", "No cards are due right now.");
       return;
     }
-    setCardQueue(due);
+    setCardQueue(queue);
     setCardIndex(0);
     setCardFlipped(false);
     setReviewingCards(true);
+    setActiveSection("cards");
+  }
+
+  function startCardReview() {
+    const today = new Date().toISOString().slice(0, 10);
+    beginCardSession(chapterCards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today)));
   }
 
   function rateReviewCard(rating: FlashcardRating) {
@@ -1182,13 +1201,24 @@ export function PracticeScreen({
         <Panel title="Flashcards" icon="albums-outline">
           {selectedSubject ? (
             <>
-              <Text style={styles.copy}>Formula and concept cards for {selectedChapter || selectedSubject}. Flip a card, rate how well you knew it, and it comes back on a spaced schedule.</Text>
               {chapterCards.length ? (
-                <ActionButton label={`Review cards (${dueCardCount} due)`} icon="albums-outline" onPress={startCardReview} />
-              ) : null}
+                <View style={styles.deckHero}>
+                  <Text style={styles.deckHeroEmoji}>🃏</Text>
+                  <Text style={styles.deckHeroTitle}>{selectedChapter || selectedSubject}</Text>
+                  <Text style={styles.deckHeroMeta}>
+                    {chapterCards.length} cards · {dueCardCount} due today
+                  </Text>
+                  <Pressable style={[styles.deckStartButton, !dueCardCount && styles.deckStartButtonMuted]} onPress={startCardReview}>
+                    <Text style={styles.deckStartText}>{dueCardCount ? `Review ${Math.min(dueCardCount, 15)} cards` : "All caught up ✓"}</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Text style={styles.copy}>Build a deck of the must-know formulas and facts for {selectedChapter || selectedSubject}, then drill them with spaced repetition.</Text>
+              )}
+
               <View style={styles.inlineRow}>
                 <ActionButton
-                  label={makingCards ? "Making cards..." : "Auto-make cards (formulas first)"}
+                  label={makingCards ? "Making cards..." : chapterCards.length ? "Make more cards" : "Auto-make cards (formulas first)"}
                   icon="sparkles-outline"
                   onPress={() => void handleMakeCards()}
                   compact
@@ -1207,40 +1237,42 @@ export function PracticeScreen({
               ) : null}
 
               {chapterCards.length ? (
-                <View style={styles.stack}>
-                  {chapterCards.map((card) => {
-                    const revealed = Boolean(revealedCards[card.id]);
-                    return (
-                      <View key={card.id} style={styles.questionCard}>
-                        <View style={styles.badgeWrap}>
-                          <Badge text={card.cardType} tone={card.cardType === "Formula" ? "warning" : card.cardType === "Trap" ? "danger" : "primary"} />
-                          {card.reps > 0 ? <Badge text={`Seen ${card.reps}×`} tone="neutral" /> : <Badge text="New" tone="accent" />}
-                        </View>
-                        <Text style={styles.questionTitle}>{card.front}</Text>
-                        {revealed ? (
-                          <>
-                            <View style={styles.feedbackCard}>
-                              <Text style={styles.feedbackLine}>{card.back}</Text>
+                <>
+                  <Pressable style={styles.advancedHeader} onPress={() => setShowBrowseCards((current) => !current)}>
+                    <Text style={styles.cardTitle}>Browse all cards ({chapterCards.length})</Text>
+                    <Badge text={showBrowseCards ? "Hide" : "Show"} tone="accent" />
+                  </Pressable>
+                  {showBrowseCards ? (
+                    <View style={styles.stack}>
+                      {chapterCards.map((card) => {
+                        const revealed = Boolean(revealedCards[card.id]);
+                        return (
+                          <View key={card.id} style={styles.questionCard}>
+                            <View style={styles.badgeWrap}>
+                              <Badge text={card.cardType} tone={card.cardType === "Formula" ? "warning" : card.cardType === "Trap" ? "danger" : "primary"} />
+                              {card.reps > 0 ? <Badge text={`Seen ${card.reps}×`} tone="neutral" /> : <Badge text="New" tone="accent" />}
                             </View>
-                            <Text style={styles.sectionLabel}>How well did you know it?</Text>
+                            <Text style={styles.questionTitle}>{card.front}</Text>
+                            {revealed ? (
+                              <View style={styles.feedbackCard}>
+                                <Text style={styles.feedbackLine}>{card.back}</Text>
+                              </View>
+                            ) : null}
                             <View style={styles.inlineRow}>
-                              {(["again", "hard", "good", "easy"] as FlashcardRating[]).map((rating) => (
-                                <Pressable key={rating} style={styles.levelChip} onPress={() => handleRateCard(card.id, rating)}>
-                                  <Text style={styles.levelChipText}>{rating === "again" ? "Again" : rating === "hard" ? "Hard" : rating === "good" ? "Good" : "Easy"}</Text>
-                                </Pressable>
-                              ))}
+                              <ActionButton
+                                label={revealed ? "Hide" : "Show answer"}
+                                icon="eye-outline"
+                                onPress={() => setRevealedCards((current) => ({ ...current, [card.id]: !current[card.id] }))}
+                                compact
+                              />
+                              <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteFlashcard(card.id)} compact />
                             </View>
-                          </>
-                        ) : (
-                          <View style={styles.inlineRow}>
-                            <ActionButton label="Show answer" icon="eye-outline" onPress={() => setRevealedCards((current) => ({ ...current, [card.id]: true }))} compact />
-                            <ActionButton label="Delete" icon="trash-outline" onPress={() => deleteFlashcard(card.id)} compact />
                           </View>
-                        )}
-                      </View>
-                    );
-                  })}
-                </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </>
               ) : (
                 <EmptyState text="No cards yet. Tap 'Auto-make cards' to build a deck for this chapter." />
               )}
@@ -1752,6 +1784,45 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 320,
+  },
+  deckHero: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: 18,
+    alignItems: "center",
+    gap: 8,
+  },
+  deckHeroEmoji: {
+    fontSize: 30,
+  },
+  deckHeroTitle: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  deckHeroMeta: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  deckStartButton: {
+    alignSelf: "stretch",
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  deckStartButtonMuted: {
+    backgroundColor: colors.inkSoft,
+  },
+  deckStartText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 15,
   },
   cardModalBackdrop: {
     flex: 1,

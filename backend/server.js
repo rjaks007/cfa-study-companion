@@ -643,7 +643,8 @@ app.post("/api/generate-flashcards", async (req, res) => {
         "Put ALL the key formulas FIRST as Formula cards — front = the name and when to use it, back = the formula written plainly plus a one-line note. " +
         "Then add the highest-yield Concept, Application and Trap cards. " +
         "Front is a short question or cue; back is a concise, exam-useful answer. Mention BA II Plus usage on the back when it helps. " +
-        "Base everything strictly on the supplied material and do not invent. Aim for 8 to 16 cards total. Do not use markdown.",
+        "Keep the deck LEAN — only the must-know items. Aim for 6 to 12 cards total: every essential formula, plus only the few highest-yield concepts and traps. Do not pad with trivia or near-duplicates. " +
+        "Base everything strictly on the supplied material and do not invent. Do not use markdown.",
       userText: JSON.stringify({ subject, chapterTitle, chapter }),
     });
 

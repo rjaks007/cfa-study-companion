@@ -457,6 +457,10 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
     selectedReadingId,
     backendBaseUrl: value.backendBaseUrl || base.backendBaseUrl,
     notificationsEnabled: Boolean(value.notificationsEnabled),
+    streakCount: Number(value.streakCount || 0),
+    lastActiveDate: value.lastActiveDate || "",
+    activeDates: Array.isArray(value.activeDates) ? value.activeDates : [],
+    bloomCount: Number(value.bloomCount || 0),
   };
 }
 
@@ -589,6 +593,28 @@ export function useStudyCompanion() {
   });
   const dueCards = studyState.cards.filter((card) => !card.suspended && (!card.nextReview || diffDays(card.nextReview) <= 0));
   const currentCard = dueCards[0];
+
+  // Study Garden: streak + a sprout that grows toward a bloom; flowers are kept.
+  const studyGarden = useMemo(() => {
+    const streak = studyState.streakCount || 0;
+    const cycle = streak % 7;
+    const stage = streak === 0 || cycle <= 1 ? "🌱" : cycle <= 3 ? "🌿" : cycle <= 5 ? "🪴" : "🌸";
+    const todayDate = new Date();
+    const weekDots = Array.from({ length: 7 }).map((_, index) => {
+      const date = new Date(todayDate);
+      date.setDate(todayDate.getDate() - (6 - index));
+      const iso = date.toISOString().slice(0, 10);
+      return { iso, active: (studyState.activeDates || []).includes(iso) };
+    });
+    return {
+      streak,
+      stage,
+      weekDots,
+      bloomCount: studyState.bloomCount || 0,
+      progress: Math.round((cycle / 7) * 100),
+      toNextBloom: 7 - cycle,
+    };
+  }, [studyState.streakCount, studyState.activeDates, studyState.bloomCount]);
   const completedReadings = studyState.readings.filter((reading) => reading.status === "done").length;
   const syllabusProgress = Math.round((completedReadings / studyState.readings.length) * 100);
   const totalHours = studyState.sessions.reduce((sum, session) => sum + Number(session.hours || 0), 0);
@@ -868,6 +894,7 @@ export function useStudyCompanion() {
       pendingReviewDate: "",
       reviewHistory: [...(reading.reviewHistory || []), { date, score: confidence }],
     });
+    registerStudyActivity();
   }
 
   function snoozeReview(readingId: string, days = 1) {
@@ -927,6 +954,7 @@ export function useStudyCompanion() {
       revisionCycle,
       reviewHistory,
     });
+    registerStudyActivity();
   }
 
   function setSelectedSubject(subject: Subject) {
@@ -1272,10 +1300,27 @@ export function useStudyCompanion() {
       ...current,
       cards: current.cards.map((card) => (card.id === cardId ? calculateCardUpdate(card, rating) : card)),
     }));
+    registerStudyActivity();
   }
 
   function deleteFlashcard(cardId: string) {
     setStudyState((current) => ({ ...current, cards: current.cards.filter((card) => card.id !== cardId) }));
+  }
+
+  // Streak / Study Garden: records that the user studied today and grows the garden.
+  // A new flower blooms each time the streak crosses a 7-day milestone.
+  function registerStudyActivity() {
+    setStudyState((current) => {
+      const today = todayISO();
+      if (current.lastActiveDate === today) return current;
+      const continuing = current.lastActiveDate === addDays(today, -1);
+      const prevStreak = continuing ? current.streakCount || 0 : 0;
+      const streakCount = prevStreak + 1;
+      const crossedBloom = Math.floor(streakCount / 7) > Math.floor(prevStreak / 7);
+      const bloomCount = (current.bloomCount || 0) + (crossedBloom ? 1 : 0);
+      const activeDates = Array.from(new Set([...(current.activeDates || []), today])).slice(-21);
+      return { ...current, streakCount, lastActiveDate: today, bloomCount, activeDates };
+    });
   }
 
   function updateMock(index: number, patch: Partial<StoredState["mocks"][number]>) {
@@ -1680,6 +1725,7 @@ export function useStudyCompanion() {
         return { ...upload, generatedAnswers, coverageLog };
       }),
     }));
+    registerStudyActivity();
   }
 
   function saveCurrentPracticeSet(subject: Subject) {
@@ -1959,6 +2005,7 @@ export function useStudyCompanion() {
     backlogReadings,
     dueReadingReviews,
     dueCards,
+    studyGarden,
     currentCard,
     syllabusProgress,
     totalHours,

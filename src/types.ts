@@ -272,6 +272,10 @@ export interface StoredState {
   selectedReadingId: string;
   backendBaseUrl: string;
   notificationsEnabled: boolean;
+  streakCount: number;
+  lastActiveDate: string;
+  activeDates: string[];
+  bloomCount: number;
 }
 
 export interface SessionDraft {

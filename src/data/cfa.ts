@@ -386,6 +386,10 @@ export function createInitialState(): StoredState {
     selectedReadingId: readings[0].id,
     backendBaseUrl: "http://localhost:8787",
     notificationsEnabled: false,
+    streakCount: 0,
+    lastActiveDate: "",
+    activeDates: [],
+    bloomCount: 0,
   };
 }
 
