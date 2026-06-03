@@ -22,6 +22,9 @@ export default function App() {
   // Kept at the app level so the assistant conversation survives switching tabs.
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantMessages, setAssistantMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  // Kept at the app level so the Practice tab remembers your subject/chapter across tabs.
+  const [practiceSubject, setPracticeSubject] = useState<Subject | null>(null);
+  const [practiceChapter, setPracticeChapter] = useState("");
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -296,6 +299,10 @@ export default function App() {
                   setAssistantQuestion={setAssistantQuestion}
                   assistantMessages={assistantMessages}
                   setAssistantMessages={setAssistantMessages}
+                  selectedSubject={practiceSubject}
+                  setSelectedSubject={setPracticeSubject}
+                  selectedChapter={practiceChapter}
+                  setSelectedChapter={setPracticeChapter}
                 />
               </>
             ) : null}

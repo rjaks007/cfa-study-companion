@@ -72,6 +72,10 @@ export function PracticeScreen({
   setAssistantQuestion,
   assistantMessages,
   setAssistantMessages,
+  selectedSubject,
+  setSelectedSubject,
+  selectedChapter,
+  setSelectedChapter,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -110,10 +114,12 @@ export function PracticeScreen({
   setAssistantQuestion: (value: string) => void;
   assistantMessages: ChatMessage[];
   setAssistantMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  selectedSubject: Subject | null;
+  setSelectedSubject: React.Dispatch<React.SetStateAction<Subject | null>>;
+  selectedChapter: string;
+  setSelectedChapter: React.Dispatch<React.SetStateAction<string>>;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
-  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
-  const [selectedChapter, setSelectedChapter] = useState("");
   const [questionCount, setQuestionCount] = useState("10");
   const [difficulty, setDifficulty] = useState<PracticeDifficulty>("1");
   const [showAdvanced, setShowAdvanced] = useState(false);
