@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
@@ -202,6 +202,10 @@ export function PracticeScreen({
   const [cardBack, setCardBack] = useState("");
   const [makingCards, setMakingCards] = useState(false);
   const [showAddCard, setShowAddCard] = useState(false);
+  const [reviewingCards, setReviewingCards] = useState(false);
+  const [cardQueue, setCardQueue] = useState<Flashcard[]>([]);
+  const [cardIndex, setCardIndex] = useState(0);
+  const [cardFlipped, setCardFlipped] = useState(false);
   const [reviewContext, setReviewContext] = useState<{ subject: Subject; chapterTitle: string } | null>(null);
   const [reviewScheduled, setReviewScheduled] = useState(false);
   const handledReviewNonce = useRef("");
@@ -275,6 +279,10 @@ export function PracticeScreen({
     () => flashcards.filter((card) => card.topic === selectedSubject && card.readingTitle === selectedChapter),
     [flashcards, selectedSubject, selectedChapter],
   );
+  const dueCardCount = chapterCards.filter((card) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return !card.suspended && (!card.nextReview || card.nextReview <= today);
+  }).length;
   const wrongGeneratedQuestions = activeUpload?.generatedSet
     ? activeUpload.generatedSet.questions.filter((question) => {
         const selected = activeUpload.generatedAnswers[question.id];
@@ -493,6 +501,31 @@ export function PracticeScreen({
   function handleRateCard(cardId: string, rating: FlashcardRating) {
     reviewChapterCard(cardId, rating);
     setRevealedCards((current) => ({ ...current, [cardId]: false }));
+  }
+
+  // Anki-style one-at-a-time review session over the chapter's due cards.
+  function startCardReview() {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = chapterCards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today));
+    if (!due.length) {
+      Alert.alert("All caught up", "No cards are due for this chapter right now.");
+      return;
+    }
+    setCardQueue(due);
+    setCardIndex(0);
+    setCardFlipped(false);
+    setReviewingCards(true);
+  }
+
+  function rateReviewCard(rating: FlashcardRating) {
+    const card = cardQueue[cardIndex];
+    if (card) reviewChapterCard(card.id, rating);
+    if (cardIndex + 1 >= cardQueue.length) {
+      setReviewingCards(false);
+    } else {
+      setCardIndex((value) => value + 1);
+      setCardFlipped(false);
+    }
   }
 
   function handleSaveCurrentSet() {
@@ -1150,11 +1183,15 @@ export function PracticeScreen({
           {selectedSubject ? (
             <>
               <Text style={styles.copy}>Formula and concept cards for {selectedChapter || selectedSubject}. Flip a card, rate how well you knew it, and it comes back on a spaced schedule.</Text>
+              {chapterCards.length ? (
+                <ActionButton label={`Review cards (${dueCardCount} due)`} icon="albums-outline" onPress={startCardReview} />
+              ) : null}
               <View style={styles.inlineRow}>
                 <ActionButton
                   label={makingCards ? "Making cards..." : "Auto-make cards (formulas first)"}
                   icon="sparkles-outline"
                   onPress={() => void handleMakeCards()}
+                  compact
                 />
                 <ActionButton label={showAddCard ? "Close" : "Add a card"} icon="add-outline" onPress={() => setShowAddCard((current) => !current)} compact />
               </View>
@@ -1213,6 +1250,62 @@ export function PracticeScreen({
           )}
         </Panel>
       ) : null}
+
+      <Modal visible={reviewingCards} animationType="slide" transparent onRequestClose={() => setReviewingCards(false)}>
+        <View style={styles.cardModalBackdrop}>
+          <View style={styles.cardModalSheet}>
+            {cardQueue[cardIndex] ? (
+              <>
+                <View style={styles.cardModalHeader}>
+                  <Text style={styles.cardModalProgress}>
+                    Card {cardIndex + 1} of {cardQueue.length}
+                  </Text>
+                  <Pressable onPress={() => setReviewingCards(false)}>
+                    <Badge text="Close" tone="neutral" />
+                  </Pressable>
+                </View>
+
+                <View style={styles.cardFace}>
+                  <Badge
+                    text={cardQueue[cardIndex].cardType}
+                    tone={cardQueue[cardIndex].cardType === "Formula" ? "warning" : cardQueue[cardIndex].cardType === "Trap" ? "danger" : "primary"}
+                  />
+                  <Text style={styles.cardFront}>{cardQueue[cardIndex].front}</Text>
+                  {cardFlipped ? (
+                    <>
+                      <View style={styles.cardDivider} />
+                      <Text style={styles.cardBack}>{cardQueue[cardIndex].back}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.cardHint}>Tap "Show answer" when you've recalled it.</Text>
+                  )}
+                </View>
+
+                {cardFlipped ? (
+                  <View style={styles.cardRateRow}>
+                    <Pressable style={[styles.cardRateButton, styles.cardRateAgain]} onPress={() => rateReviewCard("again")}>
+                      <Text style={styles.cardRateText}>Again</Text>
+                    </Pressable>
+                    <Pressable style={[styles.cardRateButton, styles.cardRateHard]} onPress={() => rateReviewCard("hard")}>
+                      <Text style={styles.cardRateText}>Hard</Text>
+                    </Pressable>
+                    <Pressable style={[styles.cardRateButton, styles.cardRateGood]} onPress={() => rateReviewCard("good")}>
+                      <Text style={styles.cardRateText}>Good</Text>
+                    </Pressable>
+                    <Pressable style={[styles.cardRateButton, styles.cardRateEasy]} onPress={() => rateReviewCard("easy")}>
+                      <Text style={styles.cardRateText}>Easy</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable style={styles.cardShowButton} onPress={() => setCardFlipped(true)}>
+                    <Text style={styles.cardShowButtonText}>Show answer</Text>
+                  </Pressable>
+                )}
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.bottomSpacer} />
     </>
@@ -1659,5 +1752,99 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 320,
+  },
+  cardModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(20,50,77,0.55)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  cardModalSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    padding: 18,
+    gap: 16,
+  },
+  cardModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  cardModalProgress: {
+    color: colors.inkSoft,
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  cardFace: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
+    minHeight: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+  },
+  cardFront: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 18,
+    lineHeight: 26,
+    textAlign: "center",
+  },
+  cardHint: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    textAlign: "center",
+  },
+  cardDivider: {
+    height: 1,
+    alignSelf: "stretch",
+    backgroundColor: colors.border,
+  },
+  cardBack: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: "center",
+  },
+  cardShowButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  cardShowButtonText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  cardRateRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  cardRateButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  cardRateText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  cardRateAgain: {
+    backgroundColor: colors.danger,
+  },
+  cardRateHard: {
+    backgroundColor: colors.warning,
+  },
+  cardRateGood: {
+    backgroundColor: colors.primary,
+  },
+  cardRateEasy: {
+    backgroundColor: colors.success,
   },
 });

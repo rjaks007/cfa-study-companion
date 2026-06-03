@@ -103,17 +103,8 @@ export default function App() {
   }
 
   function scrollPracticeBottomIntoView() {
-    const ref = scrollRef.current;
-    const scrollNearBottom = () => {
-      if (!ref) return;
-      if (typeof ref.scrollToPosition === "function") {
-        ref.scrollToPosition(0, 500, true);
-      } else if (typeof ref.scrollTo === "function") {
-        ref.scrollTo({ x: 0, y: 500, animated: true });
-      }
-    };
-    setTimeout(scrollNearBottom, Platform.OS === "android" ? 120 : 80);
-    setTimeout(scrollNearBottom, Platform.OS === "android" ? 210 : 130);
+    // KeyboardAwareScrollView already scrolls the focused field into view;
+    // the old forced jump is what pushed inputs off-screen, so this is now a no-op.
   }
 
   const panResponder = useMemo(
@@ -147,7 +138,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <View style={styles.flex}>
         <View style={styles.flex} {...panResponder.panHandlers}>
           <KeyboardAwareScrollView
             innerRef={(ref) => {
@@ -157,9 +148,7 @@ export default function App() {
             contentContainerStyle={[styles.content, keyboardVisible ? styles.contentKeyboardOpen : styles.contentWithTabs]}
             enableOnAndroid
             enableAutomaticScroll
-            extraScrollHeight={Platform.OS === "android" ? 250 : 160}
-            extraHeight={Platform.OS === "android" ? 220 : 160}
-            keyboardOpeningTime={0}
+            extraScrollHeight={Platform.OS === "android" ? 40 : 24}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
@@ -326,7 +315,7 @@ export default function App() {
             </View>
           ) : null}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
