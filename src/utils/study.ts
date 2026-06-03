@@ -62,11 +62,15 @@ export function parseInputDate(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+export function reviewIntervalDays(score: number) {
+  if (score <= 3) return 2;
+  if (score <= 5) return 5;
+  if (score <= 7) return 10;
+  return 20;
+}
+
 export function nextReviewFromScore(score: number, baseDate = todayISO()) {
-  if (score <= 3) return addDays(baseDate, 2);
-  if (score <= 5) return addDays(baseDate, 5);
-  if (score <= 7) return addDays(baseDate, 10);
-  return addDays(baseDate, 20);
+  return addDays(baseDate, reviewIntervalDays(score));
 }
 
 export function calculateCardUpdate(card: Flashcard, rating: FlashcardRating): Flashcard {

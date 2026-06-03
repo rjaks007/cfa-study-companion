@@ -26,7 +26,8 @@ import {
   UploadRecord,
 } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
-import { addDays, calculateCardUpdate, diffDays, makeId, nextReviewFromScore, todayISO } from "../utils/study";
+import { addDays, calculateCardUpdate, diffDays, makeId, nextReviewFromScore, reviewIntervalDays, todayISO } from "../utils/study";
+import { buildTopicCoverage } from "../utils/coverage";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
 
 function parseStructuredAiOutput(content: string) {
@@ -855,6 +856,17 @@ export function useStudyCompanion() {
     const confidence = Math.max(1, Math.min(10, scoreConfidence + nudgeOffset));
     const date = todayISO();
 
+    // Coverage-aware interval: a high score should not push a poorly-covered chapter
+    // far out. Cap the gap by how much of the chapter has actually been tested, so
+    // untested topics come back around while there is still material left to cover.
+    let intervalDays = reviewIntervalDays(confidence);
+    const upload = studyState.uploads.find((item) => item.subject === subject);
+    const coverage = upload ? buildTopicCoverage(upload, chapterTitle) : null;
+    if (coverage && coverage.total) {
+      if (coverage.percent < 50) intervalDays = Math.min(intervalDays, 3);
+      else if (coverage.percent < 80) intervalDays = Math.min(intervalDays, 7);
+    }
+
     // Idempotent for the same day: submitting settles the review, and a later
     // Tougher/Easier adjustment REPLACES that day's entry instead of double-counting.
     const settledToday = reading.lastReviewed === date && !reading.pendingReview;
@@ -866,7 +878,7 @@ export function useStudyCompanion() {
       status: reading.status === "not-started" ? "in-progress" : reading.status,
       confidence,
       lastReviewed: date,
-      nextReview: nextReviewFromScore(confidence, date),
+      nextReview: addDays(date, intervalDays),
       pendingReview: false,
       pendingReviewDate: "",
       revisionCycle,
