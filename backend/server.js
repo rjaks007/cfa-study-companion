@@ -43,16 +43,19 @@ const MODELS = {
 // When `forceJson` is set we append a firm instruction to emit JSON only.
 // (We avoid assistant-message prefill because some models, e.g. Opus 4.8,
 // reject it; parseStructuredOutput already extracts the JSON robustly.)
-async function runClaude({ model, system, userText, maxTokens = 4096, forceJson = false }) {
+async function runClaude({ model, system, userText, messages, maxTokens = 4096, forceJson = false }) {
   const finalUserText = forceJson
     ? `${userText}\n\nRespond with only the JSON object described in the instructions. Do not write anything before or after the JSON, and do not use markdown code fences.`
     : userText;
+
+  // `messages` (a full multi-turn array) takes precedence; otherwise a single user turn.
+  const finalMessages = Array.isArray(messages) && messages.length ? messages : [{ role: "user", content: finalUserText }];
 
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
     system,
-    messages: [{ role: "user", content: finalUserText }],
+    messages: finalMessages,
   });
 
   const text = (response.content || [])
@@ -564,32 +567,48 @@ app.post(
 
 app.post("/api/study-chat", async (req, res) => {
   try {
-    const { subject = "Unknown subject", question = "", parsedChapters = [], performanceSummary = null, aiSummary = "", extraContext = {} } = req.body || {};
+    const {
+      subject = "Unknown subject",
+      question = "",
+      parsedChapters = [],
+      performanceSummary = null,
+      aiSummary = "",
+      extraContext = {},
+      history = [],
+      focusChapter = null,
+    } = req.body || {};
 
     if (!question || !String(question).trim()) {
       return res.status(400).json({ error: "question is required." });
     }
 
+    // Build a real multi-turn conversation: prior turns + the new question. The
+    // study context (chapters, performance, focus) rides only on the new turn.
+    const priorTurns = (Array.isArray(history) ? history : [])
+      .filter((turn) => turn && (turn.role === "user" || turn.role === "assistant") && typeof turn.content === "string" && turn.content.trim())
+      .slice(-12)
+      .map((turn) => ({ role: turn.role, content: turn.content }));
+
+    const contextPayload = JSON.stringify({ subject, performanceSummary, aiSummary, focusChapter, parsedChapters, extraContext });
+    const finalTurn = {
+      role: "user",
+      content: `${question}\n\n[Reference material for you — use it but do not quote it verbatim]:\n${contextPayload}`,
+    };
+
     const response = await runClaude({
       model: MODELS.chat,
       maxTokens: 2048,
       system:
-        "You are a CFA Level I study assistant inside a personal study app. " +
-        "Use the supplied notes summaries, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
+        "You are a CFA Level I study assistant inside a personal study app, having an ongoing conversation with the student. " +
+        "Use the supplied focus chapter, parsed chapters, generated review, and performance summary to answer clearly, practically, and briefly. " +
+        "Treat earlier turns as context and answer follow-ups naturally (e.g. 'explain more', 'give an example') without repeating yourself. " +
         "Assume the student uses the BA II Plus financial calculator in the exam. When a numerical topic benefits from it, say where and how the calculator is useful. " +
         "Stay grounded in the supplied material. If the source is unclear, say what is uncertain instead of inventing. " +
         "Do not use markdown bullets, asterisks, or code fences. Write in clean short paragraphs. " +
         "If formulas are needed, write them as plain readable lines such as 'Future value = Present value × (1 + r)^n'. " +
         "When helpful, explain why the student's choice was wrong and what concept it confused. " +
         "End with a short 'Revise next:' line only when useful.",
-      userText: JSON.stringify({
-        subject,
-        question,
-        performanceSummary,
-        aiSummary,
-        parsedChapters,
-        extraContext,
-      }),
+      messages: [...priorTurns, finalTurn],
     });
 
     res.json({

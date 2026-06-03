@@ -1382,13 +1382,20 @@ export function useStudyCompanion() {
     return true;
   }
 
-  async function askPracticeAssistant(subject: Subject, question: string, extraContext?: Record<string, unknown>) {
+  async function askPracticeAssistant(
+    subject: Subject,
+    question: string,
+    extraContext?: Record<string, unknown>,
+    history?: { role: "user" | "assistant"; content: string }[],
+  ) {
     const backendBaseUrl = studyState.backendBaseUrl.trim().replace(/\/$/, "");
     if (!backendBaseUrl) {
       throw new Error("Add your backend URL first.");
     }
 
     const upload = studyState.uploads.find((item) => item.subject === subject);
+    const focusTitle = typeof extraContext?.chapterTitle === "string" ? extraContext.chapterTitle : "";
+    const focusChapter = upload?.parsedChapters.find((chapter) => chapter.readingTitle === focusTitle) || null;
     const performanceSummary = upload
       ? {
           totalChapters: upload.parsedChapters.length,
@@ -1416,13 +1423,20 @@ export function useStudyCompanion() {
       body: JSON.stringify({
         subject,
         question,
-        parsedChapters: upload?.parsedChapters || [],
+        history: history || [],
+        // Lightweight chapter list (no heavy excerpts) + the focused chapter's material.
+        parsedChapters: (upload?.parsedChapters || []).map((chapter) => ({ readingTitle: chapter.readingTitle, losChecklist: chapter.losChecklist })),
+        focusChapter: focusChapter
+          ? {
+              readingTitle: focusChapter.readingTitle,
+              losChecklist: focusChapter.losChecklist,
+              notesExcerpt: focusChapter.notesExcerpt || "",
+              questionExcerpt: focusChapter.questionExcerpt || "",
+            }
+          : null,
         performanceSummary,
         aiSummary: upload?.aiSummary || "",
-        generatedSet: upload?.generatedSet,
         generatedReview: upload?.generatedReview,
-        chapterKnowledge: upload?.parsedChapters || [],
-        practiceHistory: upload?.practiceHistory || [],
         extraContext: extraContext || {},
       }),
     });

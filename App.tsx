@@ -19,9 +19,9 @@ export default function App() {
   const [weeklyTarget, setWeeklyTarget] = useState<{ week?: number; readingId?: string }>({});
   const [practiceTarget, setPracticeTarget] = useState<{ subject?: Subject; chapterTitle?: string }>({});
   const [reviewRequest, setReviewRequest] = useState<{ subject?: Subject; chapterTitle?: string; nonce?: string }>({});
-  // Kept at the app level so the assistant answer survives switching tabs.
+  // Kept at the app level so the assistant conversation survives switching tabs.
   const [assistantQuestion, setAssistantQuestion] = useState("");
-  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantMessages, setAssistantMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [studySetupDate, setStudySetupDate] = useState("");
   const [setupExpanded, setSetupExpanded] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -294,8 +294,8 @@ export default function App() {
                   onCompleteReview={study.completeReviewForReading}
                   assistantQuestion={assistantQuestion}
                   setAssistantQuestion={setAssistantQuestion}
-                  assistantAnswer={assistantAnswer}
-                  setAssistantAnswer={setAssistantAnswer}
+                  assistantMessages={assistantMessages}
+                  setAssistantMessages={setAssistantMessages}
                 />
               </>
             ) : null}

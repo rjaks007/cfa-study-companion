@@ -6,6 +6,9 @@ import { PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } 
 import { buildTopicCoverage } from "../utils/coverage";
 
 type PracticeSection = "generate" | "saved" | "review" | "assistant";
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+const ASSISTANT_FOLLOW_UPS = ["Explain more simply", "Give a numerical example", "What are the common mistakes here?"];
 
 function normalizeDifficultyLabel(value: PracticeDifficulty) {
   if (value === "1") return "Foundational";
@@ -67,8 +70,8 @@ export function PracticeScreen({
   onCompleteReview,
   assistantQuestion,
   setAssistantQuestion,
-  assistantAnswer,
-  setAssistantAnswer,
+  assistantMessages,
+  setAssistantMessages,
 }: {
   uploads: UploadRecord[];
   readings: Reading[];
@@ -77,7 +80,12 @@ export function PracticeScreen({
   pickPdf: (subject: Subject, type: "notesPdfName" | "questionBankPdfName") => Promise<boolean>;
   syncSubjectWithAi: (subject: Subject) => Promise<unknown>;
   syncingSubject: Subject | null;
-  askPracticeAssistant: (subject: Subject, question: string, extraContext?: Record<string, unknown>) => Promise<{ answer: string; imageUrl: string }>;
+  askPracticeAssistant: (
+    subject: Subject,
+    question: string,
+    extraContext?: Record<string, unknown>,
+    history?: { role: "user" | "assistant"; content: string }[],
+  ) => Promise<{ answer: string; imageUrl: string }>;
   generatePracticeSet: (
     subject: Subject,
     chapterTitle: string,
@@ -100,8 +108,8 @@ export function PracticeScreen({
   onCompleteReview?: (subject: Subject, chapterTitle: string, accuracyPercent: number, nudge?: "hard" | "good" | "easy") => void;
   assistantQuestion: string;
   setAssistantQuestion: (value: string) => void;
-  assistantAnswer: string;
-  setAssistantAnswer: (value: string) => void;
+  assistantMessages: ChatMessage[];
+  setAssistantMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
@@ -345,53 +353,46 @@ export function PracticeScreen({
     }
   }
 
-  async function handleAskAssistant(extraContext?: Record<string, unknown>, directQuestion?: string) {
-    const prompt = String(directQuestion || assistantQuestion).trim();
-    if (!selectedSubject || !prompt) return;
-    try {
-      setAssistantLoading(true);
-      const result = await askPracticeAssistant(selectedSubject, prompt, {
-        chapterTitle: selectedChapter,
-        generatedReview: activeUpload?.generatedReview,
-        confidence: activeReading?.confidence || 0,
-        ...extraContext,
-      });
-      setAssistantAnswer(result.answer);
-      setActiveSection("assistant");
-    } catch (error) {
-      Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
-    } finally {
-      setAssistantLoading(false);
-    }
-  }
-
-  async function runAssistantPreset(prompt: string, extraContext?: Record<string, unknown>) {
-    if (!selectedSubject) return;
-    setAssistantQuestion(prompt);
-    await handleAskAssistant(extraContext, prompt);
-  }
-
-  async function explainWrongAnswer(question: PracticeQuestion) {
-    const selected = activeUpload?.generatedAnswers[question.id] || "";
-    if (!selectedSubject || !selected) return;
-    setAssistantQuestion(`Explain why my answer was wrong in ${question.question}`);
-    setReturnQuestionId(question.id);
-    setHighlightedQuestionId(question.id);
+  // Unified conversational ask: append the question, call the assistant with prior
+  // turns as context, then append the answer to the thread.
+  async function askAssistant(promptText: string, extraContext?: Record<string, unknown>) {
+    const text = String(promptText).trim();
+    if (!selectedSubject || !text) return;
+    const history = assistantMessages;
+    setAssistantMessages((prev) => [...prev, { role: "user", content: text }]);
+    setAssistantQuestion("");
     setActiveSection("assistant");
     try {
       setAssistantLoading(true);
-      const result = await askPracticeAssistant(selectedSubject, `Explain why my answer was wrong in ${question.question}`, {
-        mode: "explain-wrong-answer",
-        chapterTitle: selectedChapter,
-        wrongQuestion: question,
-        selectedAnswer: selected,
-      });
-      setAssistantAnswer(result.answer);
+      const result = await askPracticeAssistant(
+        selectedSubject,
+        text,
+        { chapterTitle: selectedChapter, generatedReview: activeUpload?.generatedReview, confidence: activeReading?.confidence || 0, ...extraContext },
+        history.map((message) => ({ role: message.role, content: message.content })),
+      );
+      setAssistantMessages((prev) => [...prev, { role: "assistant", content: result.answer }]);
     } catch (error) {
       Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
     } finally {
       setAssistantLoading(false);
     }
+  }
+
+  function explainWrongAnswer(question: PracticeQuestion) {
+    const selected = activeUpload?.generatedAnswers[question.id] || "";
+    if (!selectedSubject || !selected) return;
+    setReturnQuestionId(question.id);
+    setHighlightedQuestionId(question.id);
+    void askAssistant(`Explain why my answer was wrong in: ${question.question}`, {
+      mode: "explain-wrong-answer",
+      wrongQuestion: question,
+      selectedAnswer: selected,
+    });
+  }
+
+  function startAssistantQuizFromChapter() {
+    if (!selectedSubject || !selectedChapter) return;
+    void startReviewQuiz(selectedSubject, selectedChapter);
   }
 
   function handleSaveCurrentSet() {
@@ -832,19 +833,13 @@ export function PracticeScreen({
                         label="Ask assistant"
                         icon="chatbubble-ellipses-outline"
                         onPress={() => {
-                          const prompt = `Help me revise this saved question: ${item.question.question}`;
-                          setAssistantQuestion(prompt);
                           setReturnQuestionId("");
                           setHighlightedQuestionId("");
-                          setActiveSection("assistant");
-                          void handleAskAssistant(
-                            {
-                              mode: "saved-question-help",
-                              savedQuestion: item.question,
-                              chapterTitle: item.chapterTitle,
-                            },
-                            prompt,
-                          );
+                          void askAssistant(`Help me revise this saved question: ${item.question.question}`, {
+                            mode: "saved-question-help",
+                            savedQuestion: item.question,
+                            chapterTitle: item.chapterTitle,
+                          });
                         }}
                         compact
                       />
@@ -933,19 +928,13 @@ export function PracticeScreen({
                         label="Explain"
                         icon="help-circle-outline"
                         onPress={() => {
-                          const prompt = `Explain why this answer was wrong: ${item.question.question}`;
-                          setAssistantQuestion(prompt);
-                          setActiveSection("assistant");
                           setReturnQuestionId("");
-                          void handleAskAssistant(
-                            {
-                              mode: "wrong-library-help",
-                              wrongQuestion: item.question,
-                              selectedAnswer: item.selectedAnswer,
-                              chapterTitle: item.chapterTitle,
-                            },
-                            prompt,
-                          );
+                          void askAssistant(`Explain why this answer was wrong: ${item.question.question}`, {
+                            mode: "wrong-library-help",
+                            wrongQuestion: item.question,
+                            selectedAnswer: item.selectedAnswer,
+                            chapterTitle: item.chapterTitle,
+                          });
                         }}
                         compact
                       />
@@ -963,113 +952,90 @@ export function PracticeScreen({
 
       {activeSection === "assistant" ? (
         <Panel title="Study assistant" icon="chatbubble-ellipses-outline">
-          <Text style={styles.copy}>Ask about formulas, revision topics, exam tips, or why a question went wrong using your uploaded source material.</Text>
-          {returnQuestionId ? (
-            <View style={styles.inlineRow}>
-              <ActionButton label="Back to question" icon="arrow-back-outline" onPress={jumpBackToQuestion} compact />
-            </View>
-          ) : null}
           {selectedSubject ? (
             <>
-              <View style={styles.inlineRow}>
-                <ActionButton
-                  label="Formula drill"
-                  icon="calculator-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Create a formula drill for ${selectedChapter || selectedSubject}. Show the key formulas, when to use them, and one quick recall check for each.`, {
-                      mode: "formula-drill",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Exam coach"
-                  icon="school-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Coach me for exam-style questions in ${selectedChapter || selectedSubject}. Tell me the common traps, time-saving approach, and how to think under pressure.`, {
-                      mode: "exam-coach",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Chat with notes"
-                  icon="book-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Use my uploaded notes for ${selectedChapter || selectedSubject} and tell me the most important ideas in plain language.`, {
-                      mode: "chat-with-notes",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Revision sheet"
-                  icon="document-text-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Create a one-page revision sheet for ${selectedChapter || selectedSubject}. Include the exact concepts, formulas, and traps I should revise next.`, {
-                      mode: "revision-sheet",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Explain simply"
-                  icon="bulb-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Explain the hardest idea in ${selectedChapter || selectedSubject} as simply as possible, as if I am new to finance, using one short everyday analogy.`, {
-                      mode: "explain-simply",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Memory hook"
-                  icon="bookmark-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Give me a memory hook or mnemonic to remember the key formulas and concepts in ${selectedChapter || selectedSubject}, with a one-line reason it works.`, {
-                      mode: "memory-hook",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Common mistakes"
-                  icon="alert-circle-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`List the most common mistakes and exam traps students fall for in ${selectedChapter || selectedSubject}, and tell me exactly how to avoid each one.`, {
-                      mode: "common-mistakes",
-                    })
-                  }
-                  compact
-                />
-                <ActionButton
-                  label="Compare terms"
-                  icon="swap-horizontal-outline"
-                  onPress={() =>
-                    void runAssistantPreset(`Compare the most easily-confused terms or concepts in ${selectedChapter || selectedSubject} side by side, so I stop mixing them up. Keep each contrast short.`, {
-                      mode: "compare-terms",
-                    })
-                  }
-                  compact
-                />
+              <View style={styles.assistantHeaderRow}>
+                <Text style={styles.assistantFocus} numberOfLines={1}>
+                  Focused on: {selectedChapter || selectedSubject}
+                </Text>
+                {assistantMessages.length ? (
+                  <Pressable onPress={() => setAssistantMessages([])}>
+                    <Badge text="Clear chat" tone="neutral" />
+                  </Pressable>
+                ) : null}
               </View>
-              <Text style={styles.copy}>Focused on: {selectedChapter || selectedSubject}</Text>
-              {assistantAnswer ? (
-                <View style={styles.summaryCard}>
-                  <Text style={styles.cardTitle}>Assistant answer</Text>
-                  <Text style={styles.assistantText}>{assistantAnswer}</Text>
+              {returnQuestionId ? (
+                <View style={styles.inlineRow}>
+                  <ActionButton label="Back to question" icon="arrow-back-outline" onPress={jumpBackToQuestion} compact />
                 </View>
               ) : null}
+
+              {assistantMessages.length === 0 ? (
+                <View style={styles.summaryCard}>
+                  <Text style={styles.copy}>Ask anything about this chapter — it answers from your material and remembers the conversation. Try a starter:</Text>
+                  <View style={styles.inlineRow}>
+                    <ActionButton
+                      label="Explain this simply"
+                      icon="bulb-outline"
+                      onPress={() => void askAssistant(`Explain the most important ideas in ${selectedChapter || selectedSubject} as simply as possible, with one short everyday analogy.`)}
+                      compact
+                    />
+                    <ActionButton
+                      label="Key formulas"
+                      icon="calculator-outline"
+                      onPress={() => void askAssistant(`Give me the key formulas for ${selectedChapter || selectedSubject}, when to use each, and where the BA II Plus helps.`)}
+                      compact
+                    />
+                    <ActionButton
+                      label="Common traps"
+                      icon="alert-circle-outline"
+                      onPress={() => void askAssistant(`What are the most common mistakes and exam traps in ${selectedChapter || selectedSubject}, and how do I avoid them?`)}
+                      compact
+                    />
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.chatThread}>
+                  {assistantMessages.map((message, index) => (
+                    <View
+                      key={`${message.role}-${index}`}
+                      style={[styles.chatBubble, message.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}
+                    >
+                      <Text style={styles.chatRole}>{message.role === "user" ? "You" : "Assistant"}</Text>
+                      <Text style={message.role === "user" ? styles.chatTextUser : styles.assistantText}>{message.content}</Text>
+                    </View>
+                  ))}
+                  {assistantLoading ? <Text style={styles.metaText}>Thinking…</Text> : null}
+
+                  {!assistantLoading && assistantMessages[assistantMessages.length - 1]?.role === "assistant" ? (
+                    <View style={styles.inlineRow}>
+                      {ASSISTANT_FOLLOW_UPS.map((prompt) => (
+                        <Pressable key={prompt} style={styles.followUpChip} onPress={() => void askAssistant(prompt)}>
+                          <Text style={styles.followUpChipText}>{prompt}</Text>
+                        </Pressable>
+                      ))}
+                      <Pressable style={[styles.followUpChip, styles.followUpChipPrimary]} onPress={startAssistantQuizFromChapter}>
+                        <Text style={[styles.followUpChipText, styles.followUpChipTextPrimary]}>Quiz me on this</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              )}
+
               <View style={styles.summaryCard}>
                 <TextInput
                   value={assistantQuestion}
                   onChangeText={setAssistantQuestion}
                   style={[uiStyles.input, styles.chatInput]}
-                  placeholder="Ask: what exactly should I revise in Rate and Return? Give me one simple numerical example."
+                  placeholder="Ask a question, or a follow-up like 'give a harder example'…"
                   placeholderTextColor={colors.inkSoft}
                   multiline
                 />
-                <ActionButton label={assistantLoading ? "Thinking..." : "Ask assistant"} icon="sparkles-outline" onPress={() => void handleAskAssistant()} />
+                <ActionButton
+                  label={assistantLoading ? "Thinking..." : "Send"}
+                  icon="send-outline"
+                  onPress={() => void askAssistant(assistantQuestion)}
+                />
               </View>
             </>
           ) : (
@@ -1425,6 +1391,69 @@ const styles = StyleSheet.create({
   assistantText: {
     color: colors.ink,
     lineHeight: 21,
+  },
+  assistantHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  assistantFocus: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    flex: 1,
+  },
+  chatThread: {
+    gap: 10,
+  },
+  chatBubble: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    gap: 4,
+  },
+  chatBubbleUser: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+  },
+  chatBubbleAssistant: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+  },
+  chatRole: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  chatTextUser: {
+    color: colors.primary,
+    lineHeight: 21,
+    fontWeight: "600",
+  },
+  followUpChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  followUpChipPrimary: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  followUpChipText: {
+    color: colors.ink,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  followUpChipTextPrimary: {
+    color: colors.surface,
   },
   advancedHeader: {
     flexDirection: "row",
