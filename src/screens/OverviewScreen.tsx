@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
-import { formatLongDate, formatShortDate } from "../utils/study";
+import { formatLongDate } from "../utils/study";
 
 type ReadingItem = {
   id: string;
@@ -48,7 +48,6 @@ export function OverviewScreen({
   studyNext: StudyNextItem[];
 }) {
   const [studyNextOpen, setStudyNextOpen] = useState(false);
-  const nextPriority = overdueReadings[0] || dueTodayReadings[0] || todayPlan.current[0] || dueTomorrowReadings[0];
   const reviewsDue = [
     ...overdueReadings.map((reading) => ({ reading, overdue: true })),
     ...dueTodayReadings.map((reading) => ({ reading, overdue: false })),
@@ -65,24 +64,6 @@ export function OverviewScreen({
           </Text>
         </View>
 
-        <View style={styles.summaryCard}>
-          <Text style={styles.sectionTitle}>Next priority</Text>
-          {nextPriority ? (
-            <>
-              <Text style={styles.priorityTitle}>{nextPriority.subject}</Text>
-              <Text style={styles.priorityMeta}>
-                R{nextPriority.readingNumber} · {nextPriority.title}
-              </Text>
-              <View style={styles.badgeRow}>
-                <Badge text={nextPriority.status} tone={nextPriority.status === "done" ? "success" : "neutral"} />
-                {nextPriority.nextReview ? <Badge text={`Review ${formatShortDate(nextPriority.nextReview)}`} tone="accent" /> : null}
-              </View>
-            </>
-          ) : (
-            <Text style={styles.metaText}>No immediate priority. You are caught up.</Text>
-          )}
-        </View>
-
         <View style={styles.actionRow}>
           <Pressable style={styles.primaryButton} onPress={onOpenWeekly}>
             <Text style={styles.primaryButtonText}>Open weekly plan</Text>
@@ -94,6 +75,7 @@ export function OverviewScreen({
       </Panel>
 
       <Panel title="Reviews due" icon="notifications-outline">
+        <Text style={styles.purpose}>Spaced reviews — keep what you've already learned from fading.</Text>
         {reviewsDue.length ? (
           reviewsDue.slice(0, 8).map(({ reading, overdue }) => (
             <View key={reading.id} style={styles.reviewTaskCard}>
@@ -122,11 +104,31 @@ export function OverviewScreen({
         )}
       </Panel>
 
+      <Panel title="This week's chapters" icon="book-outline">
+        <Text style={styles.purpose}>New material on your plan for this week — your main learning.</Text>
+        {todayPlan.current.length ? (
+          todayPlan.current.map((reading) => (
+            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
+              <View style={styles.flex}>
+                <Text style={styles.rowTitle}>{reading.subject}</Text>
+                <Text style={styles.rowMeta}>
+                  Reading {reading.readingNumber}: {reading.title}
+                </Text>
+              </View>
+              <Badge text={reading.status} tone="neutral" />
+            </Pressable>
+          ))
+        ) : (
+          <EmptyState text="You've finished this week's chapters." />
+        )}
+      </Panel>
+
       {studyNext.length ? (
-        <Panel title="What to study next" icon="trending-up-outline">
+        <Panel title="Weak spots to revisit" icon="alert-circle-outline">
+          <Text style={styles.purpose}>Topics you've missed or haven't tested yet — tap one to drill it.</Text>
           <Pressable style={styles.collapseHeader} onPress={() => setStudyNextOpen((value) => !value)}>
             <Text style={styles.metaText}>
-              {studyNext.length} high-priority topic{studyNext.length > 1 ? "s" : ""}
+              {studyNext.length} weak topic{studyNext.length > 1 ? "s" : ""}
             </Text>
             <Badge text={studyNextOpen ? "Hide" : "Show"} tone="accent" />
           </Pressable>
@@ -149,24 +151,6 @@ export function OverviewScreen({
             : null}
         </Panel>
       ) : null}
-
-      <Panel title="Study now" icon="book-outline">
-        {todayPlan.current.length ? (
-          todayPlan.current.map((reading) => (
-            <Pressable key={reading.id} style={styles.rowCard} onPress={() => onOpenStudyReading(reading)}>
-              <View style={styles.flex}>
-                <Text style={styles.rowTitle}>{reading.subject}</Text>
-                <Text style={styles.rowMeta}>
-                  Reading {reading.readingNumber}: {reading.title}
-                </Text>
-              </View>
-              <Badge text={reading.status} tone="neutral" />
-            </Pressable>
-          ))
-        ) : (
-          <EmptyState text="You have finished the current week plan." />
-        )}
-      </Panel>
 
       <View style={styles.planEndCard}>
         <View style={styles.planEndHeader}>
@@ -232,6 +216,12 @@ const styles = StyleSheet.create({
   metaText: {
     color: colors.inkSoft,
     fontSize: 12,
+  },
+  purpose: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 2,
   },
   priorityTitle: {
     color: colors.ink,
