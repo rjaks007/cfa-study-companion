@@ -92,6 +92,7 @@ export interface Reading {
   estimatedHours: number;
   questionProgress: QuestionProgress;
   revisionCycle: number;
+  source?: "blueprint" | "synced";
 }
 
 export interface WeekPlan {

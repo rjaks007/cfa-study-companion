@@ -17,17 +17,17 @@ export const SUBJECT_ORDER: Subject[] = [
 
 export const SUBJECT_BLUEPRINT: Record<Subject, string[]> = {
   "Quantitative Methods": [
-    "Rate and Return",
-    "The Time Value of Money",
+    "Rates and Returns",
+    "Time Value of Money in Finance",
     "Statistical Measures of Asset Returns",
     "Probability Trees and Conditional Expectations",
     "Portfolio Mathematics",
-    "Simulating Investment Outcomes",
+    "Simulation Methods",
     "Estimation and Inference",
     "Hypothesis Testing",
-    "Big Data Techniques",
-    "Introduction to Linear Regression",
-    "Correlation Analysis",
+    "Parametric and Non-Parametric Tests of Independence",
+    "Simple Linear Regression",
+    "Introduction to Big Data Techniques",
   ],
   "Financial Statement Analysis": [
     "Introduction to Financial Statement Analysis",
@@ -182,6 +182,46 @@ export function buildReadings() {
   });
 
   return readings;
+}
+
+function defaultEstimatedHours(subject: Subject) {
+  if (subject === "Financial Statement Analysis") return 4;
+  if (subject === "Quantitative Methods" || subject === "Fixed Income") return 3.5;
+  return 3;
+}
+
+// Builds a single blank reading. Used both for the initial blueprint and when the
+// weekly plan is rebuilt to mirror a subject's synced chapters.
+export function buildSubjectReading(subject: Subject, readingNumber: number, title: string): Reading {
+  return {
+    id: `${subject}__${readingNumber}`,
+    subject,
+    readingNumber,
+    title,
+    weekAssigned: 1,
+    status: "not-started",
+    confidence: 0,
+    lastReviewed: "",
+    nextReview: "",
+    pendingReview: false,
+    pendingReviewDate: "",
+    sessionType: "Reading",
+    notes: "",
+    memoryMap: "",
+    formulaSheet: "",
+    summary: "",
+    chapterSummary: "",
+    memoryTip: "",
+    examTip: "",
+    weakTags: [],
+    reviewHistory: [],
+    accuracy: null,
+    questionsSolved: 0,
+    questionProgress: emptyQuestionProgress(),
+    revisionCycle: 1,
+    estimatedHours: defaultEstimatedHours(subject),
+    source: "blueprint",
+  };
 }
 
 export function assignRoadmapWeeks(readings: Reading[]) {

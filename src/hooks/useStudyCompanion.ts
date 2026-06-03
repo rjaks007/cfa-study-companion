@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useState } from "react";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
-import { assignRoadmapWeeks, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
+import { assignRoadmapWeeks, buildSubjectReading, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
 import {
   CardDraft,
   ChapterQuestionSummary,
@@ -301,8 +301,20 @@ function normalizeSavedQuestion(value: unknown): SavedPracticeQuestion | null {
 }
 
 function normalizeReading(reading: StoredState["readings"][number]) {
+  // Keep blueprint chapters' titles in sync with the canonical curriculum list (by
+  // position). Subjects rebuilt from synced materials keep their own titles. User
+  // renames live separately in roadmapOverrides (aliases), so they are not affected.
+  const blueprint = SUBJECT_BLUEPRINT[reading.subject];
+  const canonicalTitle =
+    reading.source === "synced"
+      ? reading.title
+      : blueprint && reading.readingNumber >= 1 && reading.readingNumber <= blueprint.length
+        ? blueprint[reading.readingNumber - 1]
+        : reading.title;
+
   return {
     ...reading,
+    title: canonicalTitle,
     chapterSummary: reading.chapterSummary || "",
     memoryTip: reading.memoryTip || "",
     examTip: reading.examTip || "",
@@ -313,6 +325,34 @@ function normalizeReading(reading: StoredState["readings"][number]) {
     pendingReview: Boolean(reading.pendingReview),
     pendingReviewDate: reading.pendingReviewDate || "",
   };
+}
+
+// Rebuilds a subject's readings so the weekly plan mirrors the user's synced chapters,
+// preserving existing study data (status, confidence, reviews) by position.
+function rebuildReadingsForSubject(
+  currentReadings: StoredState["readings"],
+  subject: Subject,
+  parsedChapters: { readingTitle: string }[],
+): StoredState["readings"] {
+  if (!parsedChapters.length) return currentReadings;
+
+  const existingById = new Map(currentReadings.filter((item) => item.subject === subject).map((item) => [item.id, item]));
+  const others = currentReadings.filter((item) => item.subject !== subject);
+
+  const subjectReadings = parsedChapters.map((chapter, index) => {
+    const readingNumber = index + 1;
+    const id = `${subject}__${readingNumber}`;
+    const prior = existingById.get(id);
+    const base = prior || buildSubjectReading(subject, readingNumber, chapter.readingTitle);
+    return { ...base, id, subject, readingNumber, title: chapter.readingTitle, source: "synced" as const };
+  });
+
+  const merged = [...others, ...subjectReadings];
+  merged.sort((a, b) => {
+    const subjectDelta = SUBJECT_ORDER.indexOf(a.subject) - SUBJECT_ORDER.indexOf(b.subject);
+    return subjectDelta !== 0 ? subjectDelta : a.readingNumber - b.readingNumber;
+  });
+  return merged;
 }
 
 function getRoadmapOverride(state: StoredState, readingId: string) {
@@ -1271,9 +1311,8 @@ export function useStudyCompanion() {
       const parsedChapters = normalizeParsedChapters(structured?.chapters);
       const chapterCount = parsedChapters.length || upload.chaptersDetected;
 
-      setStudyState((current) => ({
-        ...current,
-        uploads: current.uploads.map((item) =>
+      setStudyState((current) => {
+        const uploads = current.uploads.map((item) =>
           item.subject === subject
             ? {
                 ...item,
@@ -1281,7 +1320,7 @@ export function useStudyCompanion() {
                 questionBankParsed: true,
                 lastSyncAt: todayISO(),
                 chaptersDetected: chapterCount,
-                uploadStatus: "Parsed with AI",
+                uploadStatus: "Parsed with AI" as const,
                 aiSummary: "",
                 aiError: "",
                 parsedChapters,
@@ -1295,8 +1334,24 @@ export function useStudyCompanion() {
                 wrongQuestions: item.wrongQuestions,
               }
             : item,
-        ),
-      }));
+        );
+
+        // Fix C: rebuild this subject's weekly-plan chapters to mirror the synced
+        // material, preserving study data by position, then re-pack the roadmap.
+        const rebuilt = parsedChapters.length ? rebuildReadingsForSubject(current.readings, subject, parsedChapters) : current.readings;
+        const hiddenIds = hiddenRoadmapIdSet(current.roadmapOverrides);
+        const activeReadings = rebuilt.filter((reading) => !hiddenIds.has(reading.id));
+        const reassignedActive = assignRoadmapWeeks(activeReadings);
+        const activeMap = new Map(reassignedActive.map((reading) => [reading.id, reading]));
+        const nextReadings = rebuilt.map((reading) => activeMap.get(reading.id) || reading);
+
+        return {
+          ...current,
+          uploads,
+          readings: nextReadings,
+          weeks: buildWeeks(nextReadings, { includeReading: (reading) => !hiddenIds.has(reading.id) }),
+        };
+      });
 
       return payload;
     } catch (error) {
