@@ -600,12 +600,17 @@ export function useStudyCompanion() {
     const cycle = streak % 7;
     const stage = streak === 0 || cycle <= 1 ? "🌱" : cycle <= 3 ? "🌿" : cycle <= 5 ? "🪴" : "🌸";
     const todayDate = new Date();
+    const todayIso = todayDate.toISOString().slice(0, 10);
     const weekDots = Array.from({ length: 7 }).map((_, index) => {
       const date = new Date(todayDate);
       date.setDate(todayDate.getDate() - (6 - index));
       const iso = date.toISOString().slice(0, 10);
       return { iso, active: (studyState.activeDates || []).includes(iso) };
     });
+    const studiedToday = studyState.lastActiveDate === todayIso;
+    const hadActivity = (studyState.activeDates || []).length > 0;
+    // thriving = studied today; calm = streak alive but not today yet; storm = streak broken.
+    const mood: "thriving" | "calm" | "storm" = studiedToday ? "thriving" : streak > 0 ? "calm" : hadActivity ? "storm" : "calm";
     return {
       streak,
       stage,
@@ -613,8 +618,10 @@ export function useStudyCompanion() {
       bloomCount: studyState.bloomCount || 0,
       progress: Math.round((cycle / 7) * 100),
       toNextBloom: 7 - cycle,
+      studiedToday,
+      mood,
     };
-  }, [studyState.streakCount, studyState.activeDates, studyState.bloomCount]);
+  }, [studyState.streakCount, studyState.activeDates, studyState.bloomCount, studyState.lastActiveDate]);
   const completedReadings = studyState.readings.filter((reading) => reading.status === "done").length;
   const syllabusProgress = Math.round((completedReadings / studyState.readings.length) * 100);
   const totalHours = studyState.sessions.reduce((sum, session) => sum + Number(session.hours || 0), 0);

@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
-import { StreakRing } from "../components/StreakRing";
+import { GardenView } from "../components/Garden";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
 import { formatLongDate } from "../utils/study";
@@ -50,11 +50,27 @@ export function OverviewScreen({
   onMarkReviewUpdated: (readingId: string) => void;
   onStartReviewQuiz: (reading: { subject: string; title: string }) => void;
   studyNext: StudyNextItem[];
-  studyGarden: { streak: number; stage: string; weekDots: { iso: string; active: boolean }[]; bloomCount: number; progress: number; toNextBloom: number };
+  studyGarden: {
+    streak: number;
+    stage: string;
+    weekDots: { iso: string; active: boolean }[];
+    bloomCount: number;
+    progress: number;
+    toNextBloom: number;
+    studiedToday: boolean;
+    mood: "thriving" | "calm" | "storm";
+  };
   dueCardCount: number;
   onStartDailyCards: () => void;
 }) {
   const [studyNextOpen, setStudyNextOpen] = useState(false);
+  const [gardenOpen, setGardenOpen] = useState(false);
+  const gardenCaption =
+    studyGarden.mood === "thriving"
+      ? "Your garden is thriving 🌞"
+      : studyGarden.mood === "calm"
+        ? "Study today to keep it sunny ☀️"
+        : "A storm's rolling in — study to bring back the sun ⛈️";
   const reviewsDue = [
     ...overdueReadings.map((reading) => ({ reading, overdue: true })),
     ...dueTodayReadings.map((reading) => ({ reading, overdue: false })),
@@ -62,33 +78,38 @@ export function OverviewScreen({
 
   return (
     <>
-      <View style={styles.gardenCard}>
-        <View style={styles.gardenRow}>
-          <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} />
-          <View style={styles.flex}>
-            <Text style={styles.gardenTitle}>{studyGarden.streak === 0 ? "Start your streak" : "Keep it growing!"}</Text>
-            <Text style={styles.gardenSub}>
-              {studyGarden.streak === 0
-                ? "Do any review, quiz, or card today to plant your first flower 🌱"
-                : studyGarden.toNextBloom >= 7
-                  ? "You just bloomed 🌸 — a fresh ring begins."
-                  : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to your next flower 🌷`}
+      <Pressable style={styles.gardenCard} onPress={() => setGardenOpen(true)}>
+        <GardenView mood={studyGarden.mood} bloomCount={studyGarden.bloomCount} height={150} />
+        <View style={styles.gardenScrim}>
+          <Text style={styles.gardenScrimStreak}>🔥 {studyGarden.streak}-day streak</Text>
+          <Text style={styles.gardenScrimCaption}>{gardenCaption}</Text>
+        </View>
+        <View style={styles.gardenTapHint}>
+          <Text style={styles.gardenTapHintText}>Tap to open your garden</Text>
+        </View>
+      </Pressable>
+
+      {!notificationsEnabled ? (
+        <Pressable onPress={() => void onEnableNotifications()}>
+          <Text style={styles.gardenReminders}>Enable daily reminders</Text>
+        </Pressable>
+      ) : null}
+
+      <Modal visible={gardenOpen} animationType="fade" transparent onRequestClose={() => setGardenOpen(false)}>
+        <View style={styles.gardenModalBackdrop}>
+          <View style={styles.gardenModalSheet}>
+            <GardenView mood={studyGarden.mood} bloomCount={studyGarden.bloomCount} height={300} />
+            <Text style={styles.gardenModalTitle}>{gardenCaption}</Text>
+            <Text style={styles.gardenModalSub}>
+              🔥 {studyGarden.streak}-day streak · {studyGarden.bloomCount} flower{studyGarden.bloomCount === 1 ? "" : "s"} ·{" "}
+              {studyGarden.toNextBloom >= 7 ? "just bloomed!" : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to next bloom`}
             </Text>
-            {studyGarden.bloomCount ? (
-              <Text style={styles.gardenFlowers} numberOfLines={1}>
-                {Array.from({ length: Math.min(studyGarden.bloomCount, 12) })
-                  .map((_, index) => ["🌷", "🌻", "🌸", "🌼", "🌹"][index % 5])
-                  .join(" ")}
-                {studyGarden.bloomCount > 12 ? ` +${studyGarden.bloomCount - 12}` : ""}
-              </Text>
-            ) : null}
+            <Pressable style={styles.gardenModalClose} onPress={() => setGardenOpen(false)}>
+              <Text style={styles.gardenModalCloseText}>Close</Text>
+            </Pressable>
           </View>
         </View>
-
-        <Pressable onPress={() => void onEnableNotifications()}>
-          <Text style={styles.gardenReminders}>{notificationsEnabled ? "Daily reminders on ✓" : "Enable daily reminders"}</Text>
-        </Pressable>
-      </View>
+      </Modal>
 
       <Panel title="Reviews due" icon="notifications-outline">
         <Text style={styles.purpose}>Spaced reviews — keep what you've already learned from fading.</Text>
@@ -249,12 +270,75 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   gardenCard: {
-    backgroundColor: colors.surface,
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: colors.border,
+    overflow: "hidden",
+    position: "relative",
+  },
+  gardenScrim: {
+    position: "absolute",
+    top: 10,
+    left: 12,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  gardenScrimStreak: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  gardenScrimCaption: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  gardenTapHint: {
+    position: "absolute",
+    bottom: 8,
+    right: 10,
+    backgroundColor: "rgba(255,255,255,0.8)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  gardenTapHintText: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  gardenModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(20,50,77,0.6)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  gardenModalSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
     padding: 16,
     gap: 12,
+  },
+  gardenModalTitle: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  gardenModalSub: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    textAlign: "center",
+  },
+  gardenModalClose: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  gardenModalCloseText: {
+    color: colors.surface,
+    fontWeight: "800",
   },
   gardenRow: {
     flexDirection: "row",
