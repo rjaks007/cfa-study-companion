@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { StreakRing } from "../components/StreakRing";
+import { Mascot } from "../components/Mascot";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
 import { formatLongDate } from "../utils/study";
@@ -84,10 +85,13 @@ export function OverviewScreen({
     <>
       <Pressable style={styles.streakCard} onPress={() => setStreakDetailOpen(true)}>
         <View style={styles.streakRow}>
-          <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} />
+          <Mascot mood={studyGarden.mood} size={86} />
           <View style={styles.flex}>
-            <Text style={styles.streakHeading}>{studyGarden.streak === 0 ? "Start your streak" : "Keep it growing"}</Text>
+            <Text style={styles.streakHeading}>{studyGarden.streak === 0 ? "Start your streak" : `🔥 ${studyGarden.streak}-day streak`}</Text>
             <Text style={styles.streakSub}>{streakCaption}</Text>
+            <View style={styles.streakBarWrap}>
+              <ProgressBar progress={studyGarden.progress} />
+            </View>
             {studyGarden.bloomCount ? (
               <View style={styles.bloomRow}>
                 <View style={styles.bloomDot} />
@@ -337,6 +341,9 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 12,
     fontWeight: "800",
+  },
+  streakBarWrap: {
+    marginTop: 10,
   },
   streakTapHint: {
     color: colors.primary,
