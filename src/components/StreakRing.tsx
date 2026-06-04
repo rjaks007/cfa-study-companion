@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
-import Svg, { Circle } from "react-native-svg";
+import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { colors } from "../theme";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -53,12 +53,18 @@ export function StreakRing({ streak, progress, size = 124 }: { streak: number; p
         ]}
       />
       <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+        <Defs>
+          <LinearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0%" stopColor={colors.primary} />
+            <Stop offset="100%" stopColor={colors.accent} />
+          </LinearGradient>
+        </Defs>
         <Circle cx={size / 2} cy={size / 2} r={radius} stroke={colors.surfaceMuted} strokeWidth={stroke} fill="none" />
         <AnimatedCircle
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={colors.primary}
+          stroke="url(#ringGrad)"
           strokeWidth={stroke}
           fill="none"
           strokeLinecap="round"
@@ -90,17 +96,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   flame: {
-    fontSize: 18,
+    fontSize: 15,
   },
   num: {
-    color: colors.ink,
+    color: colors.primary,
     fontWeight: "800",
-    fontSize: 30,
+    fontSize: 32,
     lineHeight: 34,
   },
   label: {
     color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
 });
