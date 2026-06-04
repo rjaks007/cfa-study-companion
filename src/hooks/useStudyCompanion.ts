@@ -1330,6 +1330,14 @@ export function useStudyCompanion() {
     setStudyState((current) => {
       const today = todayISO();
       if (current.lastActiveDate === today) return current;
+
+      // A day only counts toward the streak once today's due reviews AND due cards
+      // are cleared. Until then, keep the current streak unchanged (don't advance).
+      const hiddenIds = hiddenRoadmapIdSet(current.roadmapOverrides);
+      const dueReviewsLeft = current.readings.filter((reading) => !hiddenIds.has(reading.id) && isReadingReviewPending(reading)).length;
+      const dueCardsLeft = current.cards.filter((card) => !card.suspended && (!card.nextReview || diffDays(card.nextReview) <= 0)).length;
+      if (dueReviewsLeft > 0 || dueCardsLeft > 0) return current;
+
       const continuing = current.lastActiveDate === addDays(today, -1);
       const prevStreak = continuing ? current.streakCount || 0 : 0;
       const streakCount = prevStreak + 1;
