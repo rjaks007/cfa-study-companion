@@ -1,364 +1,61 @@
-# CFA Study Companion Handoff
-
-Current project root: `/Users/akss007/Documents/New project`
-
-This repo contains an Expo React Native CFA study app plus a small Node backend for AI-powered parsing and practice generation. The app is currently in a working but locally modified state. The handoff below is written so another AI assistant can continue without needing prior conversation context.
-
-## 1) App Overview
-
-This is a CFA Level I study companion app. It helps the user:
-
-- track a syllabus roadmap by reading and subject
-- review chapters on a schedule with due/pending reminders
-- store notes, formula sheets, memory tips, and exam tips
-- upload PDF notes and question banks
-- sync uploaded material to a backend for AI parsing
-- generate practice sets, analyze mistakes, and save questions/sets
-- track confidence, revision cycles, and progress across subjects
-
-The design goal is a clean, light, CFA-style dashboard that stays simple and recognizable while still exposing detailed study controls when needed.
-
-Target users:
-
-- CFA Level I candidates
-- especially one primary user who wants a personal, local-first study planner with AI help
-
-## 2) Tech Stack
-
-### Mobile app
-
-- Expo SDK: `~54.0.0`
-- React Native: `0.81.0`
-- React: `19.1.0`
-- TypeScript: `~5.9.2`
-- Async persistence: `@react-native-async-storage/async-storage`
-- PDF/file handling:
-  - `expo-document-picker`
-  - `expo-file-system`
-  - `expo-sharing`
-- Notifications: `expo-notifications`
-- Dev client: `expo-dev-client`
-- UI/icons: `@expo/vector-icons`
-- Keyboard handling: `react-native-keyboard-aware-scroll-view`
-
-### Backend
-
-- Node.js ESM
-- Express
-- Multer
-- PDF parsing: `pdf-parse`
-- OpenAI SDK: `openai`
-- CORS + dotenv
-
-### Build/distribution
-
-- EAS build config for Android APK preview builds
-- Expo Go for quick local preview
-
-## 3) Project Structure
-
-Top-level runtime files:
-
-- [`/Users/akss007/Documents/New project/App.tsx`](./App.tsx) - app shell, tab navigation, top-level wiring, keyboard behavior
-- [`/Users/akss007/Documents/New project/app.json`](./app.json) - Expo config, app name, icons, package name, scheme
-- [`/Users/akss007/Documents/New project/babel.config.js`](./babel.config.js) - Expo Babel preset
-- [`/Users/akss007/Documents/New project/eas.json`](./eas.json) - EAS preview/production build targets
-- [`/Users/akss007/Documents/New project/package.json`](./package.json) - mobile dependencies and scripts
-- [`/Users/akss007/Documents/New project/tsconfig.json`](./tsconfig.json) - TypeScript config
-- [`/Users/akss007/Documents/New project/README.md`](./README.md) - quick start docs
-
-Mobile source tree:
-
-- [`/Users/akss007/Documents/New project/src/constants.ts`](./src/constants.ts) - storage key, tab definitions, tag lists
-- [`/Users/akss007/Documents/New project/src/theme.ts`](./src/theme.ts) - app color palette
-- [`/Users/akss007/Documents/New project/src/types.ts`](./src/types.ts) - all shared app types
-- [`/Users/akss007/Documents/New project/src/data/cfa.ts`](./src/data/cfa.ts) - CFA blueprint, roadmap generation, starter state
-- [`/Users/akss007/Documents/New project/src/hooks/useStudyCompanion.ts`](./src/hooks/useStudyCompanion.ts) - main state hook and business logic
-- [`/Users/akss007/Documents/New project/src/components/ui.tsx`](./src/components/ui.tsx) - reusable UI primitives
-- [`/Users/akss007/Documents/New project/src/utils/study.ts`](./src/utils/study.ts) - date helpers, IDs, scheduling math
-- [`/Users/akss007/Documents/New project/src/utils/templates.ts`](./src/utils/templates.ts) - formula/mind-map/summary templates and chapter summaries
-- [`/Users/akss007/Documents/New project/src/utils/notifications.ts`](./src/utils/notifications.ts) - Expo notification scheduling
-- [`/Users/akss007/Documents/New project/src/screens/OverviewScreen.tsx`](./src/screens/OverviewScreen.tsx) - overview dashboard
-- [`/Users/akss007/Documents/New project/src/screens/WeeklyPlanScreen.tsx`](./src/screens/WeeklyPlanScreen.tsx) - weekly roadmap, rename/hide/repack controls
-- [`/Users/akss007/Documents/New project/src/screens/ProgressScreen.tsx`](./src/screens/ProgressScreen.tsx) - subject/chapter progress dashboard
-- [`/Users/akss007/Documents/New project/src/screens/PracticeScreen.tsx`](./src/screens/PracticeScreen.tsx) - uploads, sync, practice generation, saved sets, assistant
-
-Backend:
-
-- [`/Users/akss007/Documents/New project/backend/server.js`](./backend/server.js) - Express AI backend
-- [`/Users/akss007/Documents/New project/backend/package.json`](./backend/package.json) - backend dependencies/scripts
-- [`/Users/akss007/Documents/New project/backend/README.md`](./backend/README.md) - backend usage notes
-- [`/Users/akss007/Documents/New project/backend/.env.example`](./backend/.env.example) - env template
-- [`/Users/akss007/Documents/New project/backend/render.yaml`](./backend/render.yaml) - Render deployment config
-
-Assets:
-
-- [`/Users/akss007/Documents/New project/assets/icon.png`](./assets/icon.png)
-- [`/Users/akss007/Documents/New project/assets/adaptive-icon.png`](./assets/adaptive-icon.png)
-- [`/Users/akss007/Documents/New project/assets/icon-artwork.svg`](./assets/icon-artwork.svg)
-- [`/Users/akss007/Documents/New project/assets/adaptive-icon-artwork.svg`](./assets/adaptive-icon-artwork.svg)
-
-Ancillary folders:
-
-- [`/Users/akss007/Documents/New project/apk_work`](./apk_work) - extracted Hermes/bundle debugging artifacts, not part of app runtime
-- [`/Users/akss007/Documents/New project/tools/hermes-dec`](./tools/hermes-dec) - vendored Hermes decompiler utility bundle
-- [`/Users/akss007/Documents/New project/tools/hbctool`](./tools/hbctool) - vendored Hermes bytecode tool bundle
-
-## 4) Current App Architecture
-
-### Main screens
-
-#### Overview
-
-[`OverviewScreen.tsx`](./src/screens/OverviewScreen.tsx) shows:
-
-- week completion progress
-- the current highest-priority reading
-- a “Study now” list for the current week
-- a “Reviews” panel with due today, tomorrow, and overdue items
-- a simple “Plan ends” card at the bottom
-
-The overview opens the weekly plan or a specific reading when the user taps a task.
-
-#### Weekly Plan
-
-[`WeeklyPlanScreen.tsx`](./src/screens/WeeklyPlanScreen.tsx) shows:
-
-- subject filter
-- current week chapters
-- full roadmap grouped by week
-- collapsible hidden-chapters section
-- roadmap rename / hide / restore controls
-- a roadmap repack button
-
-Important current behavior:
-
-- `weeklySelectedSubject` remembers the last weekly subject filter
-- chapter overrides are stored as `roadmapOverrides`
-- hidden chapters are removed from active roadmap calculation and reminders
-- `Recalculate roadmap` repacks active chapters only; hidden chapters stay hidden
-
-#### Progress
-
-[`ProgressScreen.tsx`](./src/screens/ProgressScreen.tsx) shows:
-
-- subject summary cards
-- progress bars
-- chapter rows with status + confidence
-- tap-through to weekly plan or a specific chapter
-
-The list was simplified to avoid clutter while still keeping status and confidence visible.
-
-#### Practice
-
-[`PracticeScreen.tsx`](./src/screens/PracticeScreen.tsx) shows:
-
-- subject upload cards for notes and question-bank PDFs
-- AI sync button per subject
-- chapter selector
-- chapter focus card
-- solved-so-far summaries
-- practice difficulty selection
-- generate practice set button
-- current generated set
-- saved sets
-- saved questions and wrong questions
-- review summary
-- study assistant
-- backend connection field
-
-Current practice workflow:
-
-1. Upload notes PDF and question-bank PDF
-2. Sync with backend AI
-3. Pick a chapter
-4. Generate a set
-5. Answer questions
-6. Save sets/questions or analyze mistakes
-
-## 5) State Management
-
-There is no Redux/Zustand/context store. The app uses one custom hook:
-
-- [`useStudyCompanion`](./src/hooks/useStudyCompanion.ts)
-
-That hook owns:
-
-- hydration from `AsyncStorage`
-- persistence back to `AsyncStorage`
-- roadmap state
-- selected subject / selected reading
-- weekly selected subject
-- review scheduling
-- practice uploads and generated sets
-- saved questions / wrong questions
-- flashcards and mock exams
-- derived stats (syllabus progress, accuracy, streak, exam readiness, etc.)
-
-### Data flow
-
-`App.tsx` calls `useStudyCompanion()` and passes state/actions into the four screens.
-
-State source of truth:
-
-- local app state inside `useStudyCompanion`
-- persisted to `AsyncStorage`
-
-There is no cloud sync or login yet.
-
-## 6) APIs and Data
-
-### Backend routes
-
-The backend is currently the main AI bridge. It exposes:
-
-- `GET /health`
-- `POST /api/parse-materials`
-- `POST /api/study-chat`
-- `POST /api/generate-practice-set`
-- `POST /api/analyze-practice-set`
-
-### Data model
-
-Core structures live in [`src/types.ts`](./src/types.ts). Important ones:
-
-- `Reading`
-- `WeekPlan`
-- `StoredState`
-- `UploadRecord`
-- `PracticeChapter`
-- `PracticeQuestion`
-- `GeneratedPracticeSet`
-- `GeneratedPracticeReview`
-- `SavedPracticeSet`
-- `SavedPracticeQuestion`
-- `StudySession`
-- `Flashcard`
-- `MockExam`
-
-### Practice data flow
-
-`PracticeScreen` uses the local upload record and the backend like this:
-
-- uploads PDFs to the backend
-- backend parses the PDFs into structured chapters/questions
-- app stores the parsed chapters in `UploadRecord.parsedChapters`
-- practice generation sends:
-  - subject
-  - chapter title
-  - parsed chapters
-  - existing questions
-  - missing topics
-  - coverage checklist
-  - official LOS if available from backend parsing
-- generated sets are deduped locally before storing
-
-### Review/notification data flow
-
-- due reviews are computed from `Reading.nextReview` plus pending-review state
-- hidden roadmap items are filtered from reminders
-- Expo notifications are disabled in Expo Go and only work in a real build
-
-## 7) Known Issues / TODOs
-
-- Repo-wide TypeScript checks can still be noisy because of [`apk_work/index.android.bundle.dec.js`](./apk_work/index.android.bundle.dec.js)
-- Expo Go does not support real push/reminder behavior the same way a built app does
-- There is no Google/Apple login or cloud sync yet
-- There is no production-grade database; all state is local-first
-- Backend still uses OpenAI, not Claude
-- Roadmap repack is useful but not a full adaptive planner yet
-- The app still assumes the user manually points Practice to the backend URL
-
-## 8) Build / Run Instructions
-
-### Mobile app
-
-```bash
-npm install
-npx expo start --lan -c
-```
-
-Use Expo Go for local preview. For an installable Android APK:
-
-```bash
-npx eas-cli build -p android --profile preview
-```
-
-### Backend
-
-```bash
-cd backend
-npm install
-cp .env.example .env
-```
-
-Set `OPENAI_API_KEY` in [`backend/.env`](./backend/.env) and then run:
-
-```bash
-npm run dev
-```
-
-Health check:
-
-```bash
-curl http://localhost:8787/health
-```
-
-### Render deployment
-
-The backend is configured for Render via [`backend/render.yaml`](./backend/render.yaml).
-
-## 9) Decision Log
-
-Important architectural choices made during development:
-
-- Local-first data with `AsyncStorage` instead of a cloud database
-- Custom hook (`useStudyCompanion`) instead of Redux/Zustand
-- Separate backend for AI parsing and practice generation to keep API keys off the phone
-- Roadmap overrides (`rename`, `hide`, `restore`) instead of editing parsed source data directly
-- Hidden chapters stay excluded from roadmap and reminders
-- Weekly subject filter now remembers its own last-used subject
-- Progress was simplified to reduce visual clutter while keeping confidence/status visible
-- “Plan ends” is derived from the active roadmap rather than being hard-coded
-- Notification scheduling ignores hidden chapters
-- Practice generation uses:
-  - chapter coverage checklist
-  - missing topics
-  - existing questions
-  - dedupe filtering
-
-## 10) Important Implementation Notes
-
-- `App.tsx` is the top-level coordinator. It owns tab switching, keyboard avoidance, and the “open weekly/practice for a chapter” routing helpers.
-- `useStudyCompanion.ts` is the real app brain. If something feels like “magic,” it almost certainly lives there.
-- `backend/server.js` is the AI parser/generator. If the chapter extraction or question quality is wrong, inspect this first.
-- `src/data/cfa.ts` defines the CFA reading blueprint and initial roadmap shape.
-- `src/screens/WeeklyPlanScreen.tsx` is where roadmap cleanup controls live.
-- `src/screens/PracticeScreen.tsx` is the main source upload / sync / practice workflow.
-
-## 11) Source Code Index
-
-The current runtime source files are listed below. Open them directly in the repo for the complete live code:
-
-- [`App.tsx`](./App.tsx)
-- [`src/constants.ts`](./src/constants.ts)
-- [`src/theme.ts`](./src/theme.ts)
-- [`src/types.ts`](./src/types.ts)
-- [`src/data/cfa.ts`](./src/data/cfa.ts)
-- [`src/hooks/useStudyCompanion.ts`](./src/hooks/useStudyCompanion.ts)
-- [`src/components/ui.tsx`](./src/components/ui.tsx)
-- [`src/utils/study.ts`](./src/utils/study.ts)
-- [`src/utils/templates.ts`](./src/utils/templates.ts)
-- [`src/utils/notifications.ts`](./src/utils/notifications.ts)
-- [`src/screens/OverviewScreen.tsx`](./src/screens/OverviewScreen.tsx)
-- [`src/screens/WeeklyPlanScreen.tsx`](./src/screens/WeeklyPlanScreen.tsx)
-- [`src/screens/ProgressScreen.tsx`](./src/screens/ProgressScreen.tsx)
-- [`src/screens/PracticeScreen.tsx`](./src/screens/PracticeScreen.tsx)
-- [`backend/server.js`](./backend/server.js)
-- [`backend/package.json`](./backend/package.json)
-- [`backend/README.md`](./backend/README.md)
-
-## 12) Status at Handoff Time
-
-The working tree currently contains local edits that were not committed. If you are continuing from the repo as-is, check `git status` first and decide whether to keep, commit, or discard those local edits before making new changes.
-
+# CFA Study Companion — Project Handoff (continue here)
+
+> New chat: read this file first. It captures the full current state so you don't have to re-derive anything. Project root: `/Users/akss007/Documents/New project`. Active git branch: **`codex/apk-two-fixes`** (push to this branch; it's where everything lives). Commit/push only when the user asks; end commit messages with the Co-Authored-By Claude line.
+
+## What this is
+An **Expo (React Native, SDK 54) + TypeScript** CFA Level I study app for one user, plus a small **Node/Express backend** that calls **Claude** for AI features. Local-first data in AsyncStorage; no cloud/login yet.
+
+## How to run / build / verify
+- Run on phone (Expo Go): `npx expo start --go -c` then scan **from inside Expo Go** (a stale old installed APK can hijack the QR via the custom scheme — `--go` + scanning inside Expo Go avoids it).
+- Type-check (do this after every change): `npx tsc --noEmit -p tsconfig.json` — must be clean. `tsconfig.json` excludes `apk_work`/`tools`.
+- Backend syntax: `cd backend && node --check server.js`. To test backend live locally: `env -u ANTHROPIC_API_KEY node -e "import('./server.js')..."` (the `-u` removes an empty harness env var that otherwise shadows the real key in `.env`).
+- Android APK build: `npx eas-cli build -p android --profile preview` (cloud, ~10-20 min, needs Expo login).
+- Cannot visually verify RN UI here — verify via tsc + live backend calls; user eyeballs the phone.
+
+## Backend (Claude) — `backend/server.js`
+- Uses `@anthropic-ai/sdk`. Key in `backend/.env` as `ANTHROPIC_API_KEY` (gitignored). Loads via custom dotenv backfill so an empty shell var can't shadow it.
+- **Deployed on Render**: `https://cfa-study-companion-backend.onrender.com` (free tier → cold-start ~30-60s, sleeps after 15 min). Render env var `ANTHROPIC_API_KEY` must be set. Render auto-deploys from the GitHub branch on push — confirm new deploys land. `/health` returns ok.
+- Model map `MODELS` (env-overridable: `CLAUDE_PARSE_MODEL` etc.):
+  - parse → `claude-sonnet-4-6`, chat → `claude-sonnet-4-6`, generate → `claude-opus-4-8`, analyze → `claude-sonnet-4-6`.
+- `runClaude({model, system, userText|messages, maxTokens, forceJson})` — NO assistant-prefill (Opus rejects it); `forceJson` appends a "JSON only" instruction; `messages` enables multi-turn (used by chat).
+- Endpoints:
+  - `GET /health`
+  - `POST /api/parse-materials` — **AI-FREE fast sync**: extracts PDF text, regex-parses AnalystPrep "Learning Module" chapters, returns chapters with `losChecklist` + trimmed `notesExcerpt`/`questionExcerpt` (no big AI call). Catch-all chapter if none detected. Returns `output_text` = JSON string `{subject, chapters}`.
+  - `POST /api/study-chat` — conversational; accepts `history` (multi-turn) + `focusChapter`; prompt uses **light markdown** (`**bold**` headings + `- ` bullets), rendered client-side.
+  - `POST /api/generate-practice-set` — difficulty `"1"/"2"` (Foundational/Exam; "3"/Hard removed from UI but still mapped). `DIFFICULTY_GUIDE` translates the token to instructions. Modes: standard / review-focus / weak-topics-retry / similar-questions. Reads chapter `notesExcerpt`/`questionExcerpt` when summary fields empty. Falls back to official LOS via `findOfficialLosForReading`.
+  - `POST /api/analyze-practice-set` — weak-topic review JSON.
+  - `POST /api/generate-flashcards` — lean 6-12 cards, formulas first; accepts `existingCards` (fronts) to avoid duplicates on "make more".
+
+## Frontend structure
+- `App.tsx` — tabs (overview/weekly/progress/practice), keyboard handling, routing. Holds app-level state that must survive tab switches: `assistantQuestion/assistantMessages`, `practiceSubject/practiceChapter`, `dailyCardsRequest`, plus `dueCardCount`, `startDailyCards`. Keyboard: uses ONLY `KeyboardAwareScrollView` (the old extra `KeyboardAvoidingView` and huge `extraScrollHeight` were removed — they pushed inputs off-screen). Content has `maxWidth: 640, alignSelf: center` for iPad.
+- `src/hooks/useStudyCompanion.ts` — the brain. State + persistence + all actions + derived stats. Key recent additions:
+  - **Coverage tracker**: `UploadRecord.coverageLog: CoverageAttempt[]` records every answered question (durable, survives set regeneration). `answerGeneratedQuestion` upserts it.
+  - **Review→quiz loop**: `completeReviewForReading(subject, chapterTitle, accuracy, nudge)` — score→confidence→reschedule, idempotent same-day, **coverage-aware interval** (caps the gap if chapter <50%/<80% covered).
+  - **Flashcards**: `generateChapterFlashcards`, `addChapterCard`, `reviewChapterCard`, `deleteFlashcard` (use existing SM-2 `calculateCardUpdate`). Cards keyed by `topic`(subject)+`readingTitle`.
+  - **Streak / "studyGarden"** derived `{streak, weekDots[7], studiedToday, mood, progress, ...}`. `registerStudyActivity()` advances the streak ONLY when today's due reviews AND due cards are both cleared (else keeps it). Bloom/ring concept removed from UI.
+  - `dismissRemindersPrompt()` + `StoredState.remindersPromptDismissed`.
+  - **Weekly plan mirrors synced chapters (Fix C)**: `rebuildReadingsForSubject` runs on sync — readings for a synced subject come from its parsed chapters (title+count match the user's material), preserving study data by position, marked `source: "synced"`. `normalizeReading` keeps synced titles; blueprint subjects self-correct titles from `SUBJECT_BLUEPRINT` (Quant list corrected to 2026 module names).
+- `src/data/cfa.ts` — `SUBJECT_BLUEPRINT`, `buildReadings`, `buildSubjectReading`, `assignRoadmapWeeks`, `buildWeeks`, `createInitialState`.
+- `src/utils/coverage.ts` — `buildTopicCoverage` (solid/weak/untested per chapter) + `buildStudyNext` (ranked, exam-weighted "what to study next") + `SUBJECT_WEIGHT`.
+- `src/components/` — `ui.tsx` (Panel/Badge/ProgressBar/ActionButton/etc.), `StreakRing.tsx` (gradient ring, currently unused), `Mascot.tsx` (SVG study buddy, currently unused), `Garden.tsx` (SVG scene, currently unused). `react-native-svg` is installed (bundled in Expo Go — fully restart Expo after pulling).
+- Screens:
+  - `OverviewScreen.tsx` — order: **compact streak card** (Duolingo-style: 🔥 + big number gold-when-studied-today/grey-otherwise + "day streak" + 7-day week strip with gold ✓ pills) → dismissible reminders prompt → **Reviews due** (merged overdue+today) → **Cards due today** (if any) → **This week's chapters** → **Weak spots to revisit** (collapsible) → Plan ends. Each panel has a one-line purpose. No "Today" bar; mascot/garden/ring components exist but are NOT shown currently.
+  - `PracticeScreen.tsx` — section chips: Generate / Saved / Review / **Cards** / Assistant. Subject + Chapter are **collapsible pickers** (chevron, per-chapter mastery %). Difficulty/Mode/count tucked in collapsible "Options". **Chapter coverage** strip (bar + "Practice untested"/"Drill weak" + topic chips). Test mode (answer-all-then-submit) + timer + "I guessed". Review quiz auto-settles on submit (+ optional Tougher/Easier). **Assistant is a chat thread** (history, follow-up chips, "Quiz me on this", `FormattedAnswer` renders bold/bullets). **Cards** = deck hero + auto-make (formulas first, dedupes) + Anki-style review **Modal** (one card, flip, Again/Hard/Good/Easy), 15/day cap; global "daily cards" launched from Overview via `dailyCardsRequest`.
+  - `WeeklyPlanScreen.tsx` — filter defaults to "All". Per-chapter rename/hide; "Review quiz" button (same smart flow as Overview).
+  - `ProgressScreen.tsx` — subject cards; "Done %" (syllabus) + per-chapter "Mastery %" (coverage). "What to study next" moved OUT to Overview.
+
+## Known gotchas
+- Old installed APK can hijack the Expo QR (custom scheme `cfastudycompanion`) → user sees old UI. Fix: `--go`, scan inside Expo Go, or uninstall old app.
+- Adding native-ish libs (react-native-svg) needs a FULL Expo restart, not just reload.
+- Backend changes need Render to redeploy before the phone sees them.
+- Free Render = cold starts; first request slow.
+- AsyncStorage is per-device → phone/web/iPad currently have separate data.
+
+## Pending / next steps (user's plan)
+1. **Cloud sync** (top priority, "tomorrow"): a lightweight **sync-code + free database** (recommend Upstash or Supabase) so phone + iPad + web share one dataset; add `save`/`load` endpoints on Render; push-on-change, pull-on-launch, last-write-wins. Also serves as backup.
+2. **Web version**: `npx expo export -p web` → host free (Netlify/Vercel) → "Add to Home Screen" on iPad (the user's free, any-device path; Apple native costs $99/yr recurring so they're skipping it). Verify PDF upload (web file picker) + storage on web.
+3. **Mascot/character art**: user wants a polished Kunchevsky-style mascot reacting to streak (happy↔gloomy). Coded SVG looked childish; real path = Lottie/PNG art assets. Currently NOT shown.
+4. Possible: coverage ledger UI, adaptive planner, mock-exam mode.
+
+## Decisions log
+- Local-first; custom hook (no Redux). Backend keeps API key off device. Opus only for question generation (quality); Sonnet elsewhere. Reviews = short targeted quizzes (not 40-50 grind). Streak only counts a fully-completed day. Weekly plan should mirror the user's real (synced) chapters. Web version preferred over paid Apple build for "any device, free".
