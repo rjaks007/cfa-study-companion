@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel } from "../components/ui";
-import { Mascot } from "../components/Mascot";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
 import { formatLongDate } from "../utils/study";
@@ -82,9 +81,11 @@ export function OverviewScreen({
   return (
     <>
       <View style={styles.streakCard}>
-        <Mascot mood={studyGarden.mood} size={96} />
-        <Text style={[styles.streakBigNum, studyGarden.studiedToday ? styles.streakBigNumActive : styles.streakBigNumIdle]}>{studyGarden.streak}</Text>
-        <Text style={styles.streakDayLabel}>day streak!</Text>
+        <View style={styles.streakHeaderRow}>
+          <Text style={styles.streakFlame}>🔥</Text>
+          <Text style={[styles.streakNum, studyGarden.studiedToday ? styles.streakNumActive : styles.streakNumIdle]}>{studyGarden.streak}</Text>
+          <Text style={styles.streakDayLabel}>day streak</Text>
+        </View>
 
         <View style={styles.weekStrip}>
           {studyGarden.weekDots.map((dot, index) => {
@@ -278,50 +279,53 @@ const styles = StyleSheet.create({
   },
   streakCard: {
     backgroundColor: colors.surface,
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 22,
-    paddingHorizontal: 18,
+    padding: 16,
+    gap: 12,
+  },
+  streakHeaderRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
-  streakBigNum: {
-    fontSize: 58,
+  streakFlame: {
+    fontSize: 22,
+  },
+  streakNum: {
+    fontSize: 28,
     fontWeight: "800",
-    lineHeight: 64,
-    marginTop: 2,
   },
-  streakBigNumActive: {
+  streakNumActive: {
     color: colors.accent,
   },
-  streakBigNumIdle: {
+  streakNumIdle: {
     color: "#b9c3cc",
   },
   streakDayLabel: {
     color: colors.inkSoft,
     fontSize: 15,
     fontWeight: "800",
-    marginTop: -2,
   },
   weekStrip: {
     flexDirection: "row",
     alignSelf: "stretch",
     justifyContent: "space-between",
-    marginTop: 16,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   weekItem: {
     alignItems: "center",
-    gap: 5,
+    gap: 4,
   },
   weekLetter: {
     color: colors.inkSoft,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
   },
   weekPill: {
-    width: 26,
-    height: 26,
+    width: 22,
+    height: 22,
     borderRadius: 999,
     borderWidth: 1.5,
     borderColor: colors.border,
