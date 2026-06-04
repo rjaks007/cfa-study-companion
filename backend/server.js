@@ -32,8 +32,10 @@ const MODELS = {
   parse: process.env.CLAUDE_PARSE_MODEL || "claude-sonnet-4-6",
   // Conversational study assistant.
   chat: process.env.CLAUDE_CHAT_MODEL || "claude-sonnet-4-6",
-  // Practice-set generation (highest quality bar — was the flagship model on OpenAI).
-  generate: process.env.CLAUDE_GENERATE_MODEL || "claude-opus-4-8",
+  // Practice-set generation. Sonnet is ~5x cheaper than Opus and produces
+  // strong CFA MCQs; override with CLAUDE_GENERATE_MODEL=claude-opus-4-8 if you
+  // ever want the top-tier model for a specific run.
+  generate: process.env.CLAUDE_GENERATE_MODEL || "claude-sonnet-4-6",
   // Post-set weak-topic analysis.
   analyze: process.env.CLAUDE_ANALYZE_MODEL || "claude-sonnet-4-6",
 };
@@ -51,10 +53,18 @@ async function runClaude({ model, system, userText, messages, maxTokens = 4096, 
   // `messages` (a full multi-turn array) takes precedence; otherwise a single user turn.
   const finalMessages = Array.isArray(messages) && messages.length ? messages : [{ role: "user", content: finalUserText }];
 
+  // Prompt caching: our system prompts are large and identical across calls of
+  // the same type, so we mark them as an ephemeral cache breakpoint. Repeated
+  // calls within the 5-min cache window bill the system prompt at ~10% of the
+  // normal input rate. Falls back gracefully if `system` is empty.
+  const systemBlocks = system
+    ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+    : undefined;
+
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system,
+    ...(systemBlocks ? { system: systemBlocks } : {}),
     messages: finalMessages,
   });
 
@@ -853,6 +863,110 @@ app.post("/api/analyze-practice-set", async (req, res) => {
       error: "Failed to analyze practice set.",
       details: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+// ─── Cloud Sync (Upstash Redis REST API) ────────────────────────────────────
+// Uses the Upstash REST API directly — no SDK, just fetch.
+// Env vars: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN
+// Free tier: 10K commands/day, 256 MB — plenty for one user's JSON blob.
+
+const SYNC_TTL_SECONDS = 365 * 24 * 60 * 60; // keep for 1 year
+
+function upstashUrl() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  if (!url) throw new Error("UPSTASH_REDIS_REST_URL is not set");
+  return url.replace(/\/$/, "");
+}
+
+function upstashHeaders() {
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!token) throw new Error("UPSTASH_REDIS_REST_TOKEN is not set");
+  return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+}
+
+async function redisSet(key, value) {
+  const res = await fetch(upstashUrl(), {
+    method: "POST",
+    headers: upstashHeaders(),
+    body: JSON.stringify(["SETEX", key, SYNC_TTL_SECONDS, value]),
+  });
+  if (!res.ok) throw new Error(`Upstash SET failed: ${res.status}`);
+  return res.json();
+}
+
+async function redisGet(key) {
+  const res = await fetch(`${upstashUrl()}/get/${encodeURIComponent(key)}`, {
+    headers: upstashHeaders(),
+  });
+  if (!res.ok) throw new Error(`Upstash GET failed: ${res.status}`);
+  const data = await res.json();
+  return data.result; // null if key doesn't exist
+}
+
+function generateSyncCode() {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I/L
+  let code = "";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// POST /api/sync/init — create a fresh sync code (optionally seed with state)
+app.post("/api/sync/init", async (req, res) => {
+  const syncConfigured = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  if (!syncConfigured) {
+    return res.status(503).json({ error: "Cloud sync is not configured on this server." });
+  }
+  try {
+    const { state } = req.body || {};
+    const syncCode = generateSyncCode();
+    const savedAt = Date.now();
+    const payload = JSON.stringify({ state: state || null, savedAt });
+    await redisSet(`cfa:sync:${syncCode}`, payload);
+    res.json({ ok: true, syncCode, savedAt });
+  } catch (error) {
+    console.error("sync/init error", error);
+    res.status(500).json({ error: "Failed to create sync code.", details: error.message });
+  }
+});
+
+// POST /api/sync/push — save state for an existing sync code
+app.post("/api/sync/push", async (req, res) => {
+  const syncConfigured = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  if (!syncConfigured) {
+    return res.status(503).json({ error: "Cloud sync is not configured on this server." });
+  }
+  try {
+    const { syncCode, state } = req.body || {};
+    if (!syncCode || !state) {
+      return res.status(400).json({ error: "syncCode and state are required." });
+    }
+    const savedAt = Date.now();
+    const payload = JSON.stringify({ state, savedAt });
+    await redisSet(`cfa:sync:${syncCode}`, payload);
+    res.json({ ok: true, savedAt });
+  } catch (error) {
+    console.error("sync/push error", error);
+    res.status(500).json({ error: "Failed to push state.", details: error.message });
+  }
+});
+
+// GET /api/sync/pull/:syncCode — load state for a sync code
+app.get("/api/sync/pull/:syncCode", async (req, res) => {
+  const syncConfigured = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  if (!syncConfigured) {
+    return res.status(503).json({ error: "Cloud sync is not configured on this server." });
+  }
+  try {
+    const { syncCode } = req.params;
+    if (!syncCode) return res.status(400).json({ error: "syncCode is required." });
+    const raw = await redisGet(`cfa:sync:${syncCode}`);
+    if (!raw) return res.status(404).json({ error: "Sync code not found." });
+    const parsed = JSON.parse(raw);
+    res.json({ ok: true, state: parsed.state, savedAt: parsed.savedAt });
+  } catch (error) {
+    console.error("sync/pull error", error);
+    res.status(500).json({ error: "Failed to pull state.", details: error.message });
   }
 });
 
