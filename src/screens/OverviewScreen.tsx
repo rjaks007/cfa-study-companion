@@ -80,12 +80,12 @@ export function OverviewScreen({
     <>
       <Pressable style={styles.gardenCard} onPress={() => setGardenOpen(true)}>
         <GardenView mood={studyGarden.mood} bloomCount={studyGarden.bloomCount} height={150} />
-        <View style={styles.gardenScrim}>
-          <Text style={styles.gardenScrimStreak}>🔥 {studyGarden.streak}-day streak</Text>
-          <Text style={styles.gardenScrimCaption}>{gardenCaption}</Text>
+        <View style={styles.streakBadge}>
+          <Text style={styles.streakBadgeFlame}>🔥</Text>
+          <Text style={styles.streakBadgeNum}>{studyGarden.streak}</Text>
         </View>
         <View style={styles.gardenTapHint}>
-          <Text style={styles.gardenTapHintText}>Tap to open your garden</Text>
+          <Text style={styles.gardenTapHintText}>Tap to open</Text>
         </View>
       </Pressable>
 
@@ -274,24 +274,25 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
   },
-  gardenScrim: {
+  streakBadge: {
     position: "absolute",
     top: 10,
     left: 12,
-    backgroundColor: "rgba(255,255,255,0.85)",
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(20,50,77,0.42)",
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
   },
-  gardenScrimStreak: {
-    color: colors.ink,
+  streakBadgeFlame: {
+    fontSize: 13,
+  },
+  streakBadgeNum: {
+    color: "#ffffff",
     fontWeight: "800",
-    fontSize: 14,
-  },
-  gardenScrimCaption: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    marginTop: 1,
+    fontSize: 15,
   },
   gardenTapHint: {
     position: "absolute",
