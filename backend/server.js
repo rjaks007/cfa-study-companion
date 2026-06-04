@@ -627,10 +627,11 @@ app.post("/api/study-chat", async (req, res) => {
 
 app.post("/api/generate-flashcards", async (req, res) => {
   try {
-    const { subject = "Unknown subject", chapterTitle = "", chapter = null } = req.body || {};
+    const { subject = "Unknown subject", chapterTitle = "", chapter = null, existingCards = [] } = req.body || {};
     if (!String(chapterTitle).trim() || !chapter) {
       return res.status(400).json({ error: "chapterTitle and chapter are required." });
     }
+    const existingFronts = (Array.isArray(existingCards) ? existingCards : []).map((card) => String(card?.front || "").trim()).filter(Boolean);
 
     const response = await runClaude({
       model: MODELS.chat,
@@ -644,8 +645,10 @@ app.post("/api/generate-flashcards", async (req, res) => {
         "Then add the highest-yield Concept, Application and Trap cards. " +
         "Front is a short question or cue; back is a concise, exam-useful answer. Mention BA II Plus usage on the back when it helps. " +
         "Keep the deck LEAN — only the must-know items. Aim for 6 to 12 cards total: every essential formula, plus only the few highest-yield concepts and traps. Do not pad with trivia or near-duplicates. " +
-        "Base everything strictly on the supplied material and do not invent. Do not use markdown.",
-      userText: JSON.stringify({ subject, chapterTitle, chapter }),
+        "Base everything strictly on the supplied material and do not invent. " +
+        "If existingCards are supplied, do NOT duplicate or lightly paraphrase any of them — only add genuinely new must-know items the existing deck does not already cover. If nothing important is left, return fewer cards. " +
+        "Do not use markdown.",
+      userText: JSON.stringify({ subject, chapterTitle, chapter, existingCards: existingFronts }),
     });
 
     const structured = parseStructuredOutput(response.text);

@@ -390,6 +390,7 @@ export function createInitialState(): StoredState {
     lastActiveDate: "",
     activeDates: [],
     bloomCount: 0,
+    remindersPromptDismissed: false,
   };
 }
 

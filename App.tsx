@@ -199,6 +199,8 @@ export default function App() {
                 studyGarden={study.studyGarden}
                 dueCardCount={dueCardCount}
                 onStartDailyCards={startDailyCards}
+                remindersPromptDismissed={study.studyState.remindersPromptDismissed}
+                onDismissReminders={study.dismissRemindersPrompt}
               />
             ) : null}
             {activeTab === "overview" ? (

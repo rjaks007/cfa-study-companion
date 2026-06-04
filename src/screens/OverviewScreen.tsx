@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
 import { StreakRing } from "../components/StreakRing";
 import { colors } from "../theme";
@@ -36,6 +36,8 @@ export function OverviewScreen({
   studyGarden,
   dueCardCount,
   onStartDailyCards,
+  remindersPromptDismissed,
+  onDismissReminders,
 }: {
   weekProgress: { done: number; total: number; percent: number };
   dueTodayReadings: ReadingItem[];
@@ -62,8 +64,11 @@ export function OverviewScreen({
   };
   dueCardCount: number;
   onStartDailyCards: () => void;
+  remindersPromptDismissed: boolean;
+  onDismissReminders: () => void;
 }) {
   const [studyNextOpen, setStudyNextOpen] = useState(false);
+  const [streakDetailOpen, setStreakDetailOpen] = useState(false);
   const streakCaption =
     studyGarden.streak === 0
       ? "Study anything today to begin your streak."
@@ -77,7 +82,7 @@ export function OverviewScreen({
 
   return (
     <>
-      <View style={styles.streakCard}>
+      <Pressable style={styles.streakCard} onPress={() => setStreakDetailOpen(true)}>
         <View style={styles.streakRow}>
           <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} />
           <View style={styles.flex}>
@@ -91,14 +96,49 @@ export function OverviewScreen({
                 </Text>
               </View>
             ) : null}
-            {!notificationsEnabled ? (
-              <Pressable onPress={() => void onEnableNotifications()}>
-                <Text style={styles.gardenReminders}>Enable daily reminders</Text>
-              </Pressable>
-            ) : null}
+            <Text style={styles.streakTapHint}>Tap for details</Text>
           </View>
         </View>
-      </View>
+      </Pressable>
+
+      {!notificationsEnabled && !remindersPromptDismissed ? (
+        <View style={styles.reminderPrompt}>
+          <Text style={styles.reminderText}>Want a daily nudge so you don't break your streak?</Text>
+          <View style={styles.reminderActions}>
+            <Pressable style={styles.reminderEnable} onPress={() => void onEnableNotifications()}>
+              <Text style={styles.reminderEnableText}>Enable reminders</Text>
+            </Pressable>
+            <Pressable onPress={onDismissReminders}>
+              <Text style={styles.reminderDismiss}>Not now</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      <Modal visible={streakDetailOpen} animationType="fade" transparent onRequestClose={() => setStreakDetailOpen(false)}>
+        <View style={styles.streakModalBackdrop}>
+          <View style={styles.streakModalSheet}>
+            <View style={styles.streakModalTop}>
+              <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} size={108} />
+            </View>
+            <Text style={styles.streakModalTitle}>
+              {studyGarden.streak}-day streak · {studyGarden.bloomCount} bloom{studyGarden.bloomCount === 1 ? "" : "s"}
+            </Text>
+            <View style={styles.streakWeekRow}>
+              {studyGarden.weekDots.map((dot) => (
+                <View key={dot.iso} style={[styles.streakDay, dot.active && styles.streakDayActive]} />
+              ))}
+            </View>
+            <Text style={styles.streakModalSub}>
+              Each day you study, the ring fills a little. Complete 7 days in a row and it blooms — you earn a flower (a milestone for a full week of consistency) and a fresh ring begins.{" "}
+              {studyGarden.toNextBloom >= 7 ? "You just bloomed!" : `You're ${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} from your next bloom.`}
+            </Text>
+            <Pressable style={styles.streakModalClose} onPress={() => setStreakDetailOpen(false)}>
+              <Text style={styles.streakModalCloseText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Panel title="Reviews due" icon="notifications-outline">
         <Text style={styles.purpose}>Spaced reviews — keep what you've already learned from fading.</Text>
@@ -296,6 +336,101 @@ const styles = StyleSheet.create({
   bloomText: {
     color: colors.accent,
     fontSize: 12,
+    fontWeight: "800",
+  },
+  streakTapHint: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 8,
+  },
+  reminderPrompt: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    gap: 10,
+  },
+  reminderText: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  reminderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  reminderEnable: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  reminderEnableText: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  reminderDismiss: {
+    color: colors.inkSoft,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  streakModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(20,50,77,0.6)",
+    justifyContent: "center",
+    padding: 22,
+  },
+  streakModalSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    padding: 20,
+    gap: 14,
+    alignItems: "center",
+  },
+  streakModalTop: {
+    alignItems: "center",
+  },
+  streakModalTitle: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  streakWeekRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  streakDay: {
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  streakDayActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  streakModalSub: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  streakModalClose: {
+    alignSelf: "stretch",
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  streakModalCloseText: {
+    color: colors.surface,
     fontWeight: "800",
   },
   gardenRow: {

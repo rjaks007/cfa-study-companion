@@ -461,6 +461,7 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
     lastActiveDate: value.lastActiveDate || "",
     activeDates: Array.isArray(value.activeDates) ? value.activeDates : [],
     bloomCount: Number(value.bloomCount || 0),
+    remindersPromptDismissed: Boolean(value.remindersPromptDismissed),
   };
 }
 
@@ -1267,6 +1268,10 @@ export function useStudyCompanion() {
     const chapter = upload?.parsedChapters.find((item) => item.readingTitle === chapterTitle);
     if (!chapter) throw new Error("Sync this subject and pick a chapter first.");
 
+    const existingCards = studyState.cards
+      .filter((card) => card.topic === subject && card.readingTitle === chapterTitle)
+      .map((card) => ({ front: card.front }));
+
     const response = await fetch(`${backendBaseUrl}/api/generate-flashcards`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1279,6 +1284,7 @@ export function useStudyCompanion() {
           notesExcerpt: chapter.notesExcerpt || "",
           questionExcerpt: chapter.questionExcerpt || "",
         },
+        existingCards,
       }),
     });
 
@@ -1312,6 +1318,10 @@ export function useStudyCompanion() {
 
   function deleteFlashcard(cardId: string) {
     setStudyState((current) => ({ ...current, cards: current.cards.filter((card) => card.id !== cardId) }));
+  }
+
+  function dismissRemindersPrompt() {
+    setStudyState((current) => ({ ...current, remindersPromptDismissed: true }));
   }
 
   // Streak / Study Garden: records that the user studied today and grows the garden.
@@ -2013,6 +2023,7 @@ export function useStudyCompanion() {
     dueReadingReviews,
     dueCards,
     studyGarden,
+    dismissRemindersPrompt,
     currentCard,
     syllabusProgress,
     totalHours,

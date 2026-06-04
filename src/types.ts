@@ -276,6 +276,7 @@ export interface StoredState {
   lastActiveDate: string;
   activeDates: string[];
   bloomCount: number;
+  remindersPromptDismissed: boolean;
 }
 
 export interface SessionDraft {
