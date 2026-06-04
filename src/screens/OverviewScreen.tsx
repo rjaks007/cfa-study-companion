@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
-import { StreakRing } from "../components/StreakRing";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Badge, EmptyState, Panel } from "../components/ui";
 import { Mascot } from "../components/Mascot";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
@@ -69,13 +68,12 @@ export function OverviewScreen({
   onDismissReminders: () => void;
 }) {
   const [studyNextOpen, setStudyNextOpen] = useState(false);
-  const [streakDetailOpen, setStreakDetailOpen] = useState(false);
   const streakCaption =
     studyGarden.streak === 0
-      ? "Study anything today to begin your streak."
-      : studyGarden.toNextBloom >= 7
-        ? "You just bloomed — a fresh ring begins."
-        : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to your next bloom.`;
+      ? "Study anything today to start your streak."
+      : studyGarden.studiedToday
+        ? "You studied today — your streak is safe!"
+        : "Study today so you don't lose your streak.";
   const reviewsDue = [
     ...overdueReadings.map((reading) => ({ reading, overdue: true })),
     ...dueTodayReadings.map((reading) => ({ reading, overdue: false })),
@@ -83,27 +81,28 @@ export function OverviewScreen({
 
   return (
     <>
-      <Pressable style={styles.streakCard} onPress={() => setStreakDetailOpen(true)}>
-        <View style={styles.streakRow}>
-          <Mascot mood={studyGarden.mood} size={86} />
-          <View style={styles.flex}>
-            <Text style={styles.streakHeading}>{studyGarden.streak === 0 ? "Start your streak" : `🔥 ${studyGarden.streak}-day streak`}</Text>
-            <Text style={styles.streakSub}>{streakCaption}</Text>
-            <View style={styles.streakBarWrap}>
-              <ProgressBar progress={studyGarden.progress} />
-            </View>
-            {studyGarden.bloomCount ? (
-              <View style={styles.bloomRow}>
-                <View style={styles.bloomDot} />
-                <Text style={styles.bloomText}>
-                  {studyGarden.bloomCount} bloom{studyGarden.bloomCount === 1 ? "" : "s"} earned
-                </Text>
+      <View style={styles.streakCard}>
+        <Mascot mood={studyGarden.mood} size={96} />
+        <Text style={[styles.streakBigNum, studyGarden.studiedToday ? styles.streakBigNumActive : styles.streakBigNumIdle]}>{studyGarden.streak}</Text>
+        <Text style={styles.streakDayLabel}>day streak!</Text>
+
+        <View style={styles.weekStrip}>
+          {studyGarden.weekDots.map((dot, index) => {
+            const letter = ["S", "M", "T", "W", "T", "F", "S"][new Date(dot.iso).getDay()];
+            const isToday = index === studyGarden.weekDots.length - 1;
+            return (
+              <View key={dot.iso} style={styles.weekItem}>
+                <Text style={styles.weekLetter}>{letter}</Text>
+                <View style={[styles.weekPill, dot.active && styles.weekPillActive, isToday && !dot.active && styles.weekPillToday]}>
+                  {dot.active ? <Text style={styles.weekCheck}>✓</Text> : null}
+                </View>
               </View>
-            ) : null}
-            <Text style={styles.streakTapHint}>Tap for details</Text>
-          </View>
+            );
+          })}
         </View>
-      </Pressable>
+
+        <Text style={styles.streakSub}>{streakCaption}</Text>
+      </View>
 
       {!notificationsEnabled && !remindersPromptDismissed ? (
         <View style={styles.reminderPrompt}>
@@ -118,31 +117,6 @@ export function OverviewScreen({
           </View>
         </View>
       ) : null}
-
-      <Modal visible={streakDetailOpen} animationType="fade" transparent onRequestClose={() => setStreakDetailOpen(false)}>
-        <View style={styles.streakModalBackdrop}>
-          <View style={styles.streakModalSheet}>
-            <View style={styles.streakModalTop}>
-              <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} size={108} />
-            </View>
-            <Text style={styles.streakModalTitle}>
-              {studyGarden.streak}-day streak · {studyGarden.bloomCount} bloom{studyGarden.bloomCount === 1 ? "" : "s"}
-            </Text>
-            <View style={styles.streakWeekRow}>
-              {studyGarden.weekDots.map((dot) => (
-                <View key={dot.iso} style={[styles.streakDay, dot.active && styles.streakDayActive]} />
-              ))}
-            </View>
-            <Text style={styles.streakModalSub}>
-              Each day you study, the ring fills a little. Complete 7 days in a row and it blooms — you earn a flower (a milestone for a full week of consistency) and a fresh ring begins.{" "}
-              {studyGarden.toNextBloom >= 7 ? "You just bloomed!" : `You're ${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} from your next bloom.`}
-            </Text>
-            <Pressable style={styles.streakModalClose} onPress={() => setStreakDetailOpen(false)}>
-              <Text style={styles.streakModalCloseText}>Got it</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
 
       <Panel title="Reviews due" icon="notifications-outline">
         <Text style={styles.purpose}>Spaced reviews — keep what you've already learned from fading.</Text>
@@ -307,7 +281,66 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 18,
+    paddingVertical: 22,
+    paddingHorizontal: 18,
+    alignItems: "center",
+  },
+  streakBigNum: {
+    fontSize: 58,
+    fontWeight: "800",
+    lineHeight: 64,
+    marginTop: 2,
+  },
+  streakBigNumActive: {
+    color: colors.accent,
+  },
+  streakBigNumIdle: {
+    color: "#b9c3cc",
+  },
+  streakDayLabel: {
+    color: colors.inkSoft,
+    fontSize: 15,
+    fontWeight: "800",
+    marginTop: -2,
+  },
+  weekStrip: {
+    flexDirection: "row",
+    alignSelf: "stretch",
+    justifyContent: "space-between",
+    marginTop: 16,
+    paddingHorizontal: 4,
+  },
+  weekItem: {
+    alignItems: "center",
+    gap: 5,
+  },
+  weekLetter: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  weekPill: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weekPillActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  weekPillToday: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+  },
+  weekCheck: {
+    color: colors.surface,
+    fontWeight: "800",
+    fontSize: 13,
   },
   streakRow: {
     flexDirection: "row",
