@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Badge, EmptyState, Panel, ProgressBar } from "../components/ui";
+import { StreakRing } from "../components/StreakRing";
 import { colors } from "../theme";
 import { StudyNextItem } from "../utils/coverage";
 import { formatLongDate } from "../utils/study";
@@ -62,38 +63,27 @@ export function OverviewScreen({
   return (
     <>
       <View style={styles.gardenCard}>
-        <View style={styles.gardenTop}>
+        <View style={styles.gardenRow}>
+          <StreakRing streak={studyGarden.streak} progress={studyGarden.progress} />
           <View style={styles.flex}>
-            <Text style={styles.gardenStreak}>🔥 {studyGarden.streak}-day streak</Text>
+            <Text style={styles.gardenTitle}>{studyGarden.streak === 0 ? "Start your streak" : "Keep it growing!"}</Text>
             <Text style={styles.gardenSub}>
               {studyGarden.streak === 0
-                ? "Study today to plant your first sprout 🌱"
+                ? "Do any review, quiz, or card today to plant your first flower 🌱"
                 : studyGarden.toNextBloom >= 7
-                  ? "Fresh sprout — keep the streak going 🌱"
-                  : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to your next bloom`}
+                  ? "You just bloomed 🌸 — a fresh ring begins."
+                  : `${studyGarden.toNextBloom} day${studyGarden.toNextBloom > 1 ? "s" : ""} to your next flower 🌷`}
             </Text>
+            {studyGarden.bloomCount ? (
+              <Text style={styles.gardenFlowers} numberOfLines={1}>
+                {Array.from({ length: Math.min(studyGarden.bloomCount, 12) })
+                  .map((_, index) => ["🌷", "🌻", "🌸", "🌼", "🌹"][index % 5])
+                  .join(" ")}
+                {studyGarden.bloomCount > 12 ? ` +${studyGarden.bloomCount - 12}` : ""}
+              </Text>
+            ) : null}
           </View>
-          <Text style={styles.gardenPlant}>{studyGarden.stage}</Text>
         </View>
-
-        <ProgressBar progress={studyGarden.progress} />
-
-        <View style={styles.weekDotsRow}>
-          {studyGarden.weekDots.map((dot) => (
-            <View key={dot.iso} style={[styles.weekDot, dot.active && styles.weekDotActive]} />
-          ))}
-        </View>
-
-        {studyGarden.bloomCount ? (
-          <View style={styles.gardenFlowersRow}>
-            <Text style={styles.gardenFlowers}>
-              {Array.from({ length: Math.min(studyGarden.bloomCount, 14) })
-                .map((_, index) => ["🌷", "🌻", "🌸", "🌼", "🌹"][index % 5])
-                .join(" ")}
-            </Text>
-            {studyGarden.bloomCount > 14 ? <Text style={styles.metaText}>+{studyGarden.bloomCount - 14}</Text> : null}
-          </View>
-        ) : null}
 
         <Pressable onPress={() => void onEnableNotifications()}>
           <Text style={styles.gardenReminders}>{notificationsEnabled ? "Daily reminders on ✓" : "Enable daily reminders"}</Text>
@@ -265,6 +255,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 16,
     gap: 12,
+  },
+  gardenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  gardenTitle: {
+    color: colors.ink,
+    fontWeight: "800",
+    fontSize: 17,
   },
   gardenTop: {
     flexDirection: "row",
