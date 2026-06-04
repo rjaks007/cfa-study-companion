@@ -54,7 +54,7 @@ export function OverviewScreen({
   studyGarden: {
     streak: number;
     stage: string;
-    weekDots: { iso: string; active: boolean }[];
+    weekDots: { iso: string; active: boolean; isToday: boolean }[];
     bloomCount: number;
     progress: number;
     toNextBloom: number;
@@ -88,13 +88,12 @@ export function OverviewScreen({
         </View>
 
         <View style={styles.weekStrip}>
-          {studyGarden.weekDots.map((dot, index) => {
+          {studyGarden.weekDots.map((dot) => {
             const letter = ["S", "M", "T", "W", "T", "F", "S"][new Date(dot.iso).getDay()];
-            const isToday = index === studyGarden.weekDots.length - 1;
             return (
               <View key={dot.iso} style={styles.weekItem}>
-                <Text style={styles.weekLetter}>{letter}</Text>
-                <View style={[styles.weekPill, dot.active && styles.weekPillActive, isToday && !dot.active && styles.weekPillToday]}>
+                <Text style={[styles.weekLetter, dot.isToday && styles.weekLetterToday]}>{letter}</Text>
+                <View style={[styles.weekPill, dot.active && styles.weekPillActive, dot.isToday && !dot.active && styles.weekPillToday]}>
                   {dot.active ? <Text style={styles.weekCheck}>✓</Text> : null}
                 </View>
               </View>
@@ -322,6 +321,10 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 10,
     fontWeight: "700",
+  },
+  weekLetterToday: {
+    color: colors.primary,
+    fontWeight: "800",
   },
   weekPill: {
     width: 22,

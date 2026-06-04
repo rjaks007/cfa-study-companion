@@ -602,11 +602,15 @@ export function useStudyCompanion() {
     const stage = streak === 0 || cycle <= 1 ? "🌱" : cycle <= 3 ? "🌿" : cycle <= 5 ? "🪴" : "🌸";
     const todayDate = new Date();
     const todayIso = todayDate.toISOString().slice(0, 10);
+    // Fixed Monday→Sunday week containing today (not a rolling 7 days).
+    const mondayOffset = (todayDate.getDay() + 6) % 7;
+    const monday = new Date(todayDate);
+    monday.setDate(todayDate.getDate() - mondayOffset);
     const weekDots = Array.from({ length: 7 }).map((_, index) => {
-      const date = new Date(todayDate);
-      date.setDate(todayDate.getDate() - (6 - index));
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + index);
       const iso = date.toISOString().slice(0, 10);
-      return { iso, active: (studyState.activeDates || []).includes(iso) };
+      return { iso, active: (studyState.activeDates || []).includes(iso), isToday: iso === todayIso };
     });
     const studiedToday = studyState.lastActiveDate === todayIso;
     const hadActivity = (studyState.activeDates || []).length > 0;
