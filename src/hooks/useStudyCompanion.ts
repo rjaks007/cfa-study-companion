@@ -1330,17 +1330,13 @@ export function useStudyCompanion() {
 
   // Streak / Study Garden: records that the user studied today and grows the garden.
   // A new flower blooms each time the streak crosses a 7-day milestone.
+  // A real study session today (a completed review, a flashcard review, or a finished
+  // practice/quiz) earns the streak — a small, always-achievable daily goal, rather
+  // than requiring the whole due backlog to be cleared.
   function registerStudyActivity() {
     setStudyState((current) => {
       const today = todayISO();
       if (current.lastActiveDate === today) return current;
-
-      // A day only counts toward the streak once today's due reviews AND due cards
-      // are cleared. Until then, keep the current streak unchanged (don't advance).
-      const hiddenIds = hiddenRoadmapIdSet(current.roadmapOverrides);
-      const dueReviewsLeft = current.readings.filter((reading) => !hiddenIds.has(reading.id) && isReadingReviewPending(reading)).length;
-      const dueCardsLeft = current.cards.filter((card) => !card.suspended && (!card.nextReview || diffDays(card.nextReview) <= 0)).length;
-      if (dueReviewsLeft > 0 || dueCardsLeft > 0) return current;
 
       const continuing = current.lastActiveDate === addDays(today, -1);
       const prevStreak = continuing ? current.streakCount || 0 : 0;

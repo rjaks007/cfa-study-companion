@@ -32,7 +32,7 @@ An **Expo (React Native, SDK 54) + TypeScript** CFA Level I study app for one us
   - **Coverage tracker**: `UploadRecord.coverageLog: CoverageAttempt[]` records every answered question (durable, survives set regeneration). `answerGeneratedQuestion` upserts it.
   - **Review→quiz loop**: `completeReviewForReading(subject, chapterTitle, accuracy, nudge)` — score→confidence→reschedule, idempotent same-day, **coverage-aware interval** (caps the gap if chapter <50%/<80% covered).
   - **Flashcards**: `generateChapterFlashcards`, `addChapterCard`, `reviewChapterCard`, `deleteFlashcard` (use existing SM-2 `calculateCardUpdate`). Cards keyed by `topic`(subject)+`readingTitle`.
-  - **Streak / "studyGarden"** derived `{streak, weekDots[7], studiedToday, mood, progress, ...}`. `registerStudyActivity()` advances the streak ONLY when today's due reviews AND due cards are both cleared (else keeps it). Bloom/ring concept removed from UI.
+  - **Streak / "studyGarden"** derived `{streak, weekDots[7] (fixed Mon-Sun + isToday), studiedToday, mood, progress, ...}`. `registerStudyActivity()` advances the streak when the user does ANY real study action today (a small achievable daily goal — NOT "clear the whole backlog"; that strict gate was tried and reverted as demotivating). Bloom/ring concept removed from UI.
   - `dismissRemindersPrompt()` + `StoredState.remindersPromptDismissed`.
   - **Weekly plan mirrors synced chapters (Fix C)**: `rebuildReadingsForSubject` runs on sync — readings for a synced subject come from its parsed chapters (title+count match the user's material), preserving study data by position, marked `source: "synced"`. `normalizeReading` keeps synced titles; blueprint subjects self-correct titles from `SUBJECT_BLUEPRINT` (Quant list corrected to 2026 module names).
 - `src/data/cfa.ts` — `SUBJECT_BLUEPRINT`, `buildReadings`, `buildSubjectReading`, `assignRoadmapWeeks`, `buildWeeks`, `createInitialState`.
@@ -58,4 +58,4 @@ An **Expo (React Native, SDK 54) + TypeScript** CFA Level I study app for one us
 4. Possible: coverage ledger UI, adaptive planner, mock-exam mode.
 
 ## Decisions log
-- Local-first; custom hook (no Redux). Backend keeps API key off device. Opus only for question generation (quality); Sonnet elsewhere. Reviews = short targeted quizzes (not 40-50 grind). Streak only counts a fully-completed day. Weekly plan should mirror the user's real (synced) chapters. Web version preferred over paid Apple build for "any device, free".
+- Local-first; custom hook (no Redux). Backend keeps API key off device. Opus only for question generation (quality); Sonnet elsewhere. Reviews = short targeted quizzes (not 40-50 grind). Streak = small achievable daily goal (any real study action), not clearing the whole backlog. Weekly plan should mirror the user's real (synced) chapters. Web version preferred over paid Apple build for "any device, free".
