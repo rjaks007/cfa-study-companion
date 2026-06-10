@@ -316,6 +316,8 @@ export default function App() {
                   targetSubject={practiceTarget.subject}
                   targetChapterTitle={practiceTarget.chapterTitle}
                   onConsumeTarget={clearPracticeTarget}
+                  onConsumeReview={() => setReviewRequest({})}
+                  onConsumeDailyCards={() => setDailyCardsRequest({})}
                   reviewRequest={reviewRequest}
                   onCompleteReview={study.completeReviewForReading}
                   assistantQuestion={assistantQuestion}

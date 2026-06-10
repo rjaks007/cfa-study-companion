@@ -115,6 +115,8 @@ export function PracticeScreen({
   targetSubject,
   targetChapterTitle,
   onConsumeTarget,
+  onConsumeReview,
+  onConsumeDailyCards,
   reviewRequest,
   onCompleteReview,
   assistantQuestion,
@@ -163,6 +165,8 @@ export function PracticeScreen({
   targetSubject?: Subject;
   targetChapterTitle?: string;
   onConsumeTarget?: () => void;
+  onConsumeReview?: () => void;
+  onConsumeDailyCards?: () => void;
   reviewRequest?: { subject?: Subject; chapterTitle?: string; nonce?: string };
   onCompleteReview?: (subject: Subject, chapterTitle: string, accuracyPercent: number, nudge?: "hard" | "good" | "easy") => void;
   assistantQuestion: string;
@@ -260,6 +264,8 @@ export function PracticeScreen({
   }, [currentSetId, submitted]);
 
   // When a review quiz is launched from the Overview screen, auto-start it once.
+  // We clear the request after handling so it can't re-fire when this screen
+  // remounts (a stale nonce would otherwise hijack the section on the next mount).
   useEffect(() => {
     const nonce = reviewRequest?.nonce;
     const subject = reviewRequest?.subject;
@@ -271,6 +277,7 @@ export function PracticeScreen({
     setActiveSection("generate");
     setPracticeMode("test");
     void startReviewQuiz(subject, chapterTitle);
+    onConsumeReview?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewRequest?.nonce]);
 
@@ -282,6 +289,7 @@ export function PracticeScreen({
     handledDailyNonce.current = nonce;
     const today = new Date().toISOString().slice(0, 10);
     beginCardSession(flashcards.filter((card) => !card.suspended && (!card.nextReview || card.nextReview <= today)));
+    onConsumeDailyCards?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dailyCardsRequest?.nonce]);
 
