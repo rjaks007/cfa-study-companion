@@ -305,6 +305,28 @@ export function PracticeScreen({
     const today = new Date().toISOString().slice(0, 10);
     return !card.suspended && (!card.nextReview || card.nextReview <= today);
   }).length;
+
+  // Whole-library overview across every subject — totals + per-subject coverage.
+  const cardLibrary = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const active = flashcards.filter((card) => !card.suspended);
+    const isDue = (card: Flashcard) => !card.nextReview || card.nextReview <= today;
+    const bySubject = new Map<string, { total: number; studied: number; due: number }>();
+    active.forEach((card) => {
+      const key = card.topic;
+      const entry = bySubject.get(key) || { total: 0, studied: 0, due: 0 };
+      entry.total += 1;
+      if (card.reps > 0) entry.studied += 1;
+      if (isDue(card)) entry.due += 1;
+      bySubject.set(key, entry);
+    });
+    return {
+      total: active.length,
+      studied: active.filter((card) => card.reps > 0).length,
+      due: active.filter(isDue).length,
+      subjects: Array.from(bySubject.entries()).sort((a, b) => b[1].total - a[1].total),
+    };
+  }, [flashcards]);
   const wrongGeneratedQuestions = activeUpload?.generatedSet
     ? activeUpload.generatedSet.questions.filter((question) => {
         const selected = activeUpload.generatedAnswers[question.id];
@@ -1206,6 +1228,33 @@ export function PracticeScreen({
       ) : null}
 
       {activeSection === "cards" ? (
+        <>
+        {cardLibrary.total ? (
+          <Panel title="Your card library" icon="stats-chart-outline">
+            <View style={styles.libTotals}>
+              <View style={styles.libStat}>
+                <Text style={styles.libStatNum}>{cardLibrary.total}</Text>
+                <Text style={styles.libStatLabel}>cards</Text>
+              </View>
+              <View style={styles.libStat}>
+                <Text style={styles.libStatNum}>{cardLibrary.studied}</Text>
+                <Text style={styles.libStatLabel}>studied</Text>
+              </View>
+              <View style={styles.libStat}>
+                <Text style={[styles.libStatNum, cardLibrary.due ? styles.libStatDue : null]}>{cardLibrary.due}</Text>
+                <Text style={styles.libStatLabel}>due now</Text>
+              </View>
+            </View>
+            {cardLibrary.subjects.map(([subject, stat]) => (
+              <View key={subject} style={styles.libRow}>
+                <Text style={styles.libRowSubject} numberOfLines={1}>{subject}</Text>
+                <Text style={styles.libRowMeta}>
+                  {stat.studied}/{stat.total} studied{stat.due ? ` · ${stat.due} due` : ""}
+                </Text>
+              </View>
+            ))}
+          </Panel>
+        ) : null}
         <Panel title="Flashcards" icon="albums-outline">
           {selectedSubject ? (
             <>
@@ -1289,6 +1338,7 @@ export function PracticeScreen({
             <EmptyState text="Sync a subject with AI first." />
           )}
         </Panel>
+        </>
       ) : null}
 
       <Modal visible={reviewingCards} animationType="slide" transparent onRequestClose={() => setReviewingCards(false)}>
@@ -1792,6 +1842,47 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 320,
+  },
+  libTotals: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 6,
+    marginBottom: 6,
+  },
+  libStat: {
+    alignItems: "center",
+  },
+  libStatNum: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  libStatDue: {
+    color: colors.danger,
+  },
+  libStatLabel: {
+    fontSize: 11,
+    color: colors.inkSoft,
+    marginTop: 2,
+  },
+  libRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 7,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 12,
+  },
+  libRowSubject: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.ink,
+  },
+  libRowMeta: {
+    fontSize: 12,
+    color: colors.inkSoft,
   },
   deckHero: {
     backgroundColor: colors.primarySoft,
