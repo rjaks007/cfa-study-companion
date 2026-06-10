@@ -9,3 +9,6 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 .DS_Store
+
+# Local-only reverse-engineering tools (not part of the app/web build)
+tools/
