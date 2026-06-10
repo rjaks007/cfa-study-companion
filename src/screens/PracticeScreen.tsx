@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
@@ -306,27 +307,60 @@ export function PracticeScreen({
     return !card.suspended && (!card.nextReview || card.nextReview <= today);
   }).length;
 
-  // Whole-library overview across every subject — totals + per-subject coverage.
+  // Whole-library overview across every subject — totals + per-subject coverage,
+  // each subject drilling down into its chapters for curated review.
   const cardLibrary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const active = flashcards.filter((card) => !card.suspended);
     const isDue = (card: Flashcard) => !card.nextReview || card.nextReview <= today;
-    const bySubject = new Map<string, { total: number; studied: number; due: number }>();
+    type Stat = { total: number; studied: number; due: number };
+    const blank = (): Stat => ({ total: 0, studied: 0, due: 0 });
+    const add = (stat: Stat, card: Flashcard) => {
+      stat.total += 1;
+      if (card.reps > 0) stat.studied += 1;
+      if (isDue(card)) stat.due += 1;
+    };
+    const bySubject = new Map<string, { stat: Stat; chapters: Map<string, Stat> }>();
     active.forEach((card) => {
-      const key = card.topic;
-      const entry = bySubject.get(key) || { total: 0, studied: 0, due: 0 };
-      entry.total += 1;
-      if (card.reps > 0) entry.studied += 1;
-      if (isDue(card)) entry.due += 1;
-      bySubject.set(key, entry);
+      const entry = bySubject.get(card.topic) || { stat: blank(), chapters: new Map<string, Stat>() };
+      add(entry.stat, card);
+      const chapterKey = card.readingTitle || "General";
+      const chStat = entry.chapters.get(chapterKey) || blank();
+      add(chStat, card);
+      entry.chapters.set(chapterKey, chStat);
+      bySubject.set(card.topic, entry);
     });
     return {
       total: active.length,
       studied: active.filter((card) => card.reps > 0).length,
       due: active.filter(isDue).length,
-      subjects: Array.from(bySubject.entries()).sort((a, b) => b[1].total - a[1].total),
+      subjects: Array.from(bySubject.entries())
+        .map(([subject, { stat, chapters }]) => ({
+          subject,
+          ...stat,
+          chapters: Array.from(chapters.entries())
+            .map(([title, chStat]) => ({ title, ...chStat }))
+            .sort((a, b) => b.total - a.total),
+        }))
+        .sort((a, b) => b.total - a.total),
     };
   }, [flashcards]);
+  const [expandedLibSubject, setExpandedLibSubject] = useState<string | null>(null);
+
+  // Jump straight into reviewing one chapter's due cards from the library.
+  function reviewChapterFromLibrary(subject: Subject, chapterTitle: string) {
+    setSelectedSubject(subject);
+    setSelectedChapter(chapterTitle);
+    const today = new Date().toISOString().slice(0, 10);
+    const due = flashcards.filter(
+      (card) => card.topic === subject && (card.readingTitle || "General") === chapterTitle && !card.suspended && (!card.nextReview || card.nextReview <= today),
+    );
+    if (!due.length) {
+      Alert.alert("All caught up", `No cards are due in ${chapterTitle} right now.`);
+      return;
+    }
+    beginCardSession(due);
+  }
   const wrongGeneratedQuestions = activeUpload?.generatedSet
     ? activeUpload.generatedSet.questions.filter((question) => {
         const selected = activeUpload.generatedAnswers[question.id];
@@ -1245,14 +1279,35 @@ export function PracticeScreen({
                 <Text style={styles.libStatLabel}>due now</Text>
               </View>
             </View>
-            {cardLibrary.subjects.map(([subject, stat]) => (
-              <View key={subject} style={styles.libRow}>
-                <Text style={styles.libRowSubject} numberOfLines={1}>{subject}</Text>
-                <Text style={styles.libRowMeta}>
-                  {stat.studied}/{stat.total} studied{stat.due ? ` · ${stat.due} due` : ""}
-                </Text>
-              </View>
-            ))}
+            {cardLibrary.subjects.map((entry) => {
+              const open = expandedLibSubject === entry.subject;
+              return (
+                <View key={entry.subject}>
+                  <Pressable style={styles.libRow} onPress={() => setExpandedLibSubject(open ? null : entry.subject)}>
+                    <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={15} color={colors.inkSoft} />
+                    <Text style={styles.libRowSubject} numberOfLines={1}>{entry.subject}</Text>
+                    <Text style={styles.libRowMeta}>
+                      {entry.studied}/{entry.total}{entry.due ? ` · ${entry.due} due` : ""}
+                    </Text>
+                  </Pressable>
+                  {open
+                    ? entry.chapters.map((chapter) => (
+                        <Pressable
+                          key={chapter.title}
+                          style={styles.libChapterRow}
+                          onPress={() => reviewChapterFromLibrary(entry.subject as Subject, chapter.title)}
+                        >
+                          <Text style={styles.libChapterTitle} numberOfLines={1}>{chapter.title}</Text>
+                          <View style={styles.libChapterRight}>
+                            <Text style={styles.libRowMeta}>{chapter.studied}/{chapter.total}</Text>
+                            {chapter.due ? <Badge text={`${chapter.due} due`} tone="danger" /> : <Ionicons name="play-circle-outline" size={18} color={colors.primary} />}
+                          </View>
+                        </Pressable>
+                      ))
+                    : null}
+                </View>
+              );
+            })}
           </Panel>
         ) : null}
         <Panel title="Flashcards" icon="albums-outline">
@@ -1883,6 +1938,24 @@ const styles = StyleSheet.create({
   libRowMeta: {
     fontSize: 12,
     color: colors.inkSoft,
+  },
+  libChapterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 7,
+    paddingLeft: 22,
+    gap: 10,
+  },
+  libChapterTitle: {
+    flex: 1,
+    fontSize: 12.5,
+    color: colors.inkSoft,
+  },
+  libChapterRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   deckHero: {
     backgroundColor: colors.primarySoft,

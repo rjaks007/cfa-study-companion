@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, RefreshControl, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { CloudSyncCard } from "./src/components/CloudSyncCard";
 import { MetricCard } from "./src/components/ui";
@@ -43,6 +43,18 @@ export default function App() {
     setDailyCardsRequest({ nonce: `daily-${Date.now()}` });
     setActiveTab("practice");
   }
+
+  const [refreshing, setRefreshing] = useState(false);
+  async function handleSyncRefresh() {
+    if (!study.studyState.syncCode || refreshing) return;
+    setRefreshing(true);
+    try {
+      await study.syncNow();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  const syncBusy = refreshing || study.cloudSyncStatus === "syncing";
 
   useEffect(() => {
     setStudySetupDate(formatInputDate(study.studyState.startDate));
@@ -188,6 +200,11 @@ export default function App() {
             extraScrollHeight={Platform.OS === "android" ? 40 : 24}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            refreshControl={
+              study.studyState.syncCode ? (
+                <RefreshControl refreshing={refreshing} onRefresh={handleSyncRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+              ) : undefined
+            }
           >
             {activeTab === "overview" ? (
               <View style={styles.hero}>
@@ -359,6 +376,21 @@ export default function App() {
             ) : null}
           </KeyboardAwareScrollView>
 
+          {study.studyState.syncCode && !keyboardVisible ? (
+            <Pressable
+              style={styles.syncFab}
+              onPress={handleSyncRefresh}
+              disabled={syncBusy}
+              accessibilityLabel="Sync now"
+            >
+              {syncBusy ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="sync-outline" size={20} color={colors.primary} />
+              )}
+            </Pressable>
+          ) : null}
+
           {!keyboardVisible ? (
             <View style={styles.bottomTabBar}>
               {TABS.map((tab) => (
@@ -505,6 +537,25 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     gap: 10,
+  },
+  syncFab: {
+    position: "absolute",
+    right: 16,
+    bottom: 96,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#112033",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+    zIndex: 20,
   },
   bottomTabBar: {
     backgroundColor: colors.surface,
