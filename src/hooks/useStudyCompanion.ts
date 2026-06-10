@@ -580,6 +580,40 @@ export function useStudyCompanion() {
     return () => clearTimeout(timer);
   }, [isHydrated, studyState]);
 
+  // Flush a pending push when the page is hidden/suspended. iOS standalone PWAs
+  // are reloaded aggressively when backgrounded, which can interrupt the 5 s
+  // debounce above. `keepalive` lets the request finish even as the app is
+  // suspended. Body is capped at 64 KB for keepalive, so we skip oversized
+  // states — those still re-sync on the next launch via the push effect.
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (typeof document === "undefined") return; // web/PWA only
+    const flush = () => {
+      if (document.visibilityState !== "hidden") return;
+      const s = studyStateRef.current;
+      if (!s.syncCode || !pendingPushRef.current) return;
+      const body = JSON.stringify({ syncCode: s.syncCode, state: s });
+      if (body.length > 60000) return; // too large for keepalive; next launch will resync
+      try {
+        void fetch(`${s.backendBaseUrl}/api/sync/push`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // ignore — local data is already persisted; next launch resyncs
+      }
+    };
+    document.addEventListener("visibilitychange", flush);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", flush);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]);
+
   useEffect(() => {
     if (!isHydrated || !studyState.notificationsEnabled) return;
     const hiddenIds = hiddenRoadmapIdSet(studyState.roadmapOverrides);
