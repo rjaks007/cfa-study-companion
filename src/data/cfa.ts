@@ -384,7 +384,7 @@ export function createInitialState(): StoredState {
     selectedSubject: SUBJECT_ORDER[0],
     weeklySelectedSubject: SUBJECT_ORDER[0],
     selectedReadingId: readings[0].id,
-    backendBaseUrl: "http://localhost:8787",
+    backendBaseUrl: "https://cfa-study-companion-backend.onrender.com",
     notificationsEnabled: false,
     streakCount: 0,
     lastActiveDate: "",
