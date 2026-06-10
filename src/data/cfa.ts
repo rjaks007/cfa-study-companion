@@ -391,6 +391,8 @@ export function createInitialState(): StoredState {
     activeDates: [],
     bloomCount: 0,
     remindersPromptDismissed: false,
+    syncCode: "",
+    syncSavedAt: 0,
   };
 }
 

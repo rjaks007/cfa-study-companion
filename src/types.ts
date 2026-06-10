@@ -277,6 +277,8 @@ export interface StoredState {
   activeDates: string[];
   bloomCount: number;
   remindersPromptDismissed: boolean;
+  syncCode: string;
+  syncSavedAt: number;
 }
 
 export interface SessionDraft {

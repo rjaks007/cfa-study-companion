@@ -462,6 +462,8 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
     activeDates: Array.isArray(value.activeDates) ? value.activeDates : [],
     bloomCount: Number(value.bloomCount || 0),
     remindersPromptDismissed: Boolean(value.remindersPromptDismissed),
+    syncCode: value.syncCode || "",
+    syncSavedAt: Number(value.syncSavedAt || 0),
   };
 }
 
@@ -474,6 +476,8 @@ export function useStudyCompanion() {
   const [search, setSearch] = useState("");
   const [newSession, setNewSession] = useState<SessionDraft>(createSessionDraft(SUBJECT_ORDER[0], createInitialState().selectedReadingId));
   const [newCard, setNewCard] = useState<CardDraft>(createCardDraft(SUBJECT_ORDER[0], createInitialState().selectedReadingId));
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle");
+  const [cloudSyncAt, setCloudSyncAt] = useState<number>(0);
 
   useEffect(() => {
     let mounted = true;
@@ -503,6 +507,54 @@ export function useStudyCompanion() {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(studyState)).catch((error) => {
       console.warn("Failed to persist study state", error);
     });
+  }, [isHydrated, studyState]);
+
+  // On launch: if a sync code is set, pull cloud state and use it if it's newer.
+  useEffect(() => {
+    if (!isHydrated || !studyState.syncCode) return;
+    const baseUrl = studyState.backendBaseUrl;
+    const code = studyState.syncCode;
+    setCloudSyncStatus("syncing");
+    fetch(`${baseUrl}/api/sync/pull/${code}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`pull failed: ${res.status}`))))
+      .then((data) => {
+        if (data.state && data.savedAt > (studyState.syncSavedAt || 0)) {
+          const merged = normalizeState({ ...data.state, syncCode: code, syncSavedAt: data.savedAt });
+          setStudyState(merged);
+        }
+        setCloudSyncStatus("ok");
+        setCloudSyncAt(Date.now());
+      })
+      .catch((error) => {
+        console.warn("Cloud sync pull failed", error);
+        setCloudSyncStatus("error");
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]); // only on first hydration
+
+  // Debounced push: after every state change, push to cloud (5 s debounce).
+  useEffect(() => {
+    if (!isHydrated || !studyState.syncCode) return;
+    const timer = setTimeout(() => {
+      const baseUrl = studyState.backendBaseUrl;
+      const code = studyState.syncCode;
+      fetch(`${baseUrl}/api/sync/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ syncCode: code, state: studyState }),
+      })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`push failed: ${res.status}`))))
+        .then((data) => {
+          setStudyState((prev) => ({ ...prev, syncSavedAt: data.savedAt }));
+          setCloudSyncStatus("ok");
+          setCloudSyncAt(Date.now());
+        })
+        .catch((error) => {
+          console.warn("Cloud sync push failed", error);
+          setCloudSyncStatus("error");
+        });
+    }, 5000);
+    return () => clearTimeout(timer);
   }, [isHydrated, studyState]);
 
   useEffect(() => {
@@ -2008,6 +2060,73 @@ export function useStudyCompanion() {
     );
   }, []);
 
+  // ── Cloud sync actions ────────────────────────────────────────────────────
+
+  async function initSync(): Promise<string> {
+    setCloudSyncStatus("syncing");
+    const baseUrl = studyState.backendBaseUrl;
+    const res = await fetch(`${baseUrl}/api/sync/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: studyState }),
+    });
+    if (!res.ok) {
+      setCloudSyncStatus("error");
+      throw new Error(`initSync failed: ${res.status}`);
+    }
+    const data = await res.json();
+    setStudyState((prev) => ({ ...prev, syncCode: data.syncCode, syncSavedAt: data.savedAt }));
+    setCloudSyncStatus("ok");
+    setCloudSyncAt(Date.now());
+    return data.syncCode as string;
+  }
+
+  async function joinSync(code: string): Promise<void> {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) throw new Error("Enter a sync code first.");
+    setCloudSyncStatus("syncing");
+    const baseUrl = studyState.backendBaseUrl;
+    const res = await fetch(`${baseUrl}/api/sync/pull/${trimmed}`);
+    if (res.status === 404) {
+      setCloudSyncStatus("error");
+      throw new Error("Code not found. Check it and try again.");
+    }
+    if (!res.ok) {
+      setCloudSyncStatus("error");
+      throw new Error(`joinSync failed: ${res.status}`);
+    }
+    const data = await res.json();
+    const merged = normalizeState({ ...(data.state || {}), syncCode: trimmed, syncSavedAt: data.savedAt });
+    setStudyState(merged);
+    setCloudSyncStatus("ok");
+    setCloudSyncAt(Date.now());
+  }
+
+  function unlinkSync() {
+    setStudyState((prev) => ({ ...prev, syncCode: "", syncSavedAt: 0 }));
+    setCloudSyncStatus("idle");
+    setCloudSyncAt(0);
+  }
+
+  async function forcePush(): Promise<void> {
+    if (!studyState.syncCode) return;
+    setCloudSyncStatus("syncing");
+    const baseUrl = studyState.backendBaseUrl;
+    const res = await fetch(`${baseUrl}/api/sync/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ syncCode: studyState.syncCode, state: studyState }),
+    });
+    if (!res.ok) {
+      setCloudSyncStatus("error");
+      throw new Error(`forcePush failed: ${res.status}`);
+    }
+    const data = await res.json();
+    setStudyState((prev) => ({ ...prev, syncSavedAt: data.savedAt }));
+    setCloudSyncStatus("ok");
+    setCloudSyncAt(Date.now());
+  }
+
   return {
     studyState,
     isHydrated,
@@ -2021,6 +2140,8 @@ export function useStudyCompanion() {
     setNewSession,
     newCard,
     setNewCard,
+    cloudSyncStatus,
+    cloudSyncAt,
     readingMap,
     visibleReadings,
     selectedReading,
@@ -2108,5 +2229,9 @@ export function useStudyCompanion() {
     deleteFlashcard,
     exportBackup,
     importBackup,
+    initSync,
+    joinSync,
+    unlinkSync,
+    forcePush,
   };
 }

@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import { CloudSyncCard } from "./src/components/CloudSyncCard";
 import { MetricCard } from "./src/components/ui";
 import { TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
@@ -229,6 +230,17 @@ export default function App() {
                   />
                 ) : null}
               </Pressable>
+            ) : null}
+            {activeTab === "overview" ? (
+              <CloudSyncCard
+                syncCode={study.studyState.syncCode}
+                syncStatus={study.cloudSyncStatus}
+                syncAt={study.cloudSyncAt}
+                onInit={study.initSync}
+                onJoin={study.joinSync}
+                onUnlink={study.unlinkSync}
+                onForcePush={study.forcePush}
+              />
             ) : null}
 
             {activeTab === "weekly" ? (
