@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? 44 : 24,
     gap: 16,
     width: "100%",
-    maxWidth: 640,
+    maxWidth: 820,
     alignSelf: "center",
   },
   contentWithTabs: {

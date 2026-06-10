@@ -1,0 +1,12 @@
+[build]
+  command = "npx expo export -p web"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Single-page app: serve index.html for any route so deep links don't 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
