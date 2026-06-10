@@ -57,6 +57,32 @@ export default function App() {
     };
   }, []);
 
+  // iOS standalone PWAs ("Add to Home Screen") are suspended when backgrounded
+  // and often resume in a stale, half-frozen JS state — taps misfire across the
+  // app until you force-quit and relaunch. To get that clean state automatically,
+  // reload the page when it becomes visible again after being hidden a while.
+  // Only in standalone mode (a normal Safari tab doesn't have this problem), and
+  // only after a real background gap so quick app-switches don't reload.
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const isStandalone =
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
+      window.matchMedia?.("(display-mode: standalone)")?.matches === true;
+    if (!isStandalone) return;
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (document.visibilityState === "visible" && hiddenAt) {
+        const awayMs = Date.now() - hiddenAt;
+        hiddenAt = 0;
+        if (awayMs > 45000) window.location.reload();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
   useEffect(() => {
     const ref = scrollRef.current;
     setTimeout(() => {
