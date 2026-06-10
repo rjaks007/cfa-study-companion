@@ -4,6 +4,12 @@
     "slug": "cfa-study-companion-mobile",
     "scheme": "cfastudycompanion",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e06729dd-de66-4b49-84b4-1421d0dc396b"
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
