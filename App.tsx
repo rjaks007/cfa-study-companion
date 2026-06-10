@@ -240,6 +240,7 @@ export default function App() {
                 onJoin={study.joinSync}
                 onUnlink={study.unlinkSync}
                 onForcePush={study.forcePush}
+                onSyncNow={study.syncNow}
               />
             ) : null}
 

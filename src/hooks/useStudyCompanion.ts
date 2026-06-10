@@ -2,7 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { assignRoadmapWeeks, buildSubjectReading, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
 import {
@@ -467,6 +468,14 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
   };
 }
 
+// Serialize the parts of state that are worth syncing, EXCLUDING the volatile
+// sync bookkeeping fields. Used to detect "did anything real change?" so the
+// push effect doesn't loop forever just because syncSavedAt was updated.
+function syncSnapshot(state: StoredState): string {
+  const { syncSavedAt: _savedAt, ...rest } = state;
+  return JSON.stringify(rest);
+}
+
 export function useStudyCompanion() {
   const [studyState, setStudyState] = useState<StoredState>(createInitialState());
   const [isHydrated, setHydrated] = useState(false);
@@ -478,6 +487,14 @@ export function useStudyCompanion() {
   const [newCard, setNewCard] = useState<CardDraft>(createCardDraft(SUBJECT_ORDER[0], createInitialState().selectedReadingId));
   const [cloudSyncStatus, setCloudSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle");
   const [cloudSyncAt, setCloudSyncAt] = useState<number>(0);
+  // true while this device has local changes not yet confirmed-pushed to the cloud.
+  const pendingPushRef = useRef(false);
+  // Snapshot (sans volatile sync fields) we last successfully pushed OR pulled,
+  // so the push effect only fires when something real changed.
+  const lastSyncedSnapshotRef = useRef<string>("");
+  // Always-current state, so listeners registered once (AppState) read fresh values.
+  const studyStateRef = useRef(studyState);
+  studyStateRef.current = studyState;
 
   useEffect(() => {
     let mounted = true;
@@ -509,35 +526,39 @@ export function useStudyCompanion() {
     });
   }, [isHydrated, studyState]);
 
-  // On launch: if a sync code is set, pull cloud state and use it if it's newer.
+  // On launch: if a sync code is set, pull the cloud copy and adopt it if newer.
   useEffect(() => {
     if (!isHydrated || !studyState.syncCode) return;
-    const baseUrl = studyState.backendBaseUrl;
-    const code = studyState.syncCode;
-    setCloudSyncStatus("syncing");
-    fetch(`${baseUrl}/api/sync/pull/${code}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`pull failed: ${res.status}`))))
-      .then((data) => {
-        if (data.state && data.savedAt > (studyState.syncSavedAt || 0)) {
-          const merged = normalizeState({ ...data.state, syncCode: code, syncSavedAt: data.savedAt });
-          setStudyState(merged);
-        }
-        setCloudSyncStatus("ok");
-        setCloudSyncAt(Date.now());
-      })
-      .catch((error) => {
-        console.warn("Cloud sync pull failed", error);
-        setCloudSyncStatus("error");
-      });
+    void pullFromCloud();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHydrated]); // only on first hydration
 
-  // Debounced push: after every state change, push to cloud (5 s debounce).
+  // When the app returns to the foreground, pull the latest (unless we have
+  // local edits not yet pushed — then we skip so we never clobber them).
+  useEffect(() => {
+    if (!isHydrated) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      if (!studyStateRef.current.syncCode) return;
+      if (pendingPushRef.current) return; // local has unsynced changes; the push effect will handle it
+      void pullFromCloud();
+    });
+    return () => sub.remove();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]);
+
+  // Debounced push: after a REAL state change, push to cloud (5 s debounce).
+  // We compare a snapshot that excludes syncSavedAt, so confirming a push
+  // (which bumps syncSavedAt) does not itself schedule another push — that was
+  // an infinite ~5 s write loop that would exhaust the free Upstash quota.
   useEffect(() => {
     if (!isHydrated || !studyState.syncCode) return;
+    const snapshot = syncSnapshot(studyState);
+    if (snapshot === lastSyncedSnapshotRef.current) return; // nothing meaningful changed
+    pendingPushRef.current = true;
+    const baseUrl = studyState.backendBaseUrl;
+    const code = studyState.syncCode;
     const timer = setTimeout(() => {
-      const baseUrl = studyState.backendBaseUrl;
-      const code = studyState.syncCode;
       fetch(`${baseUrl}/api/sync/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -545,13 +566,15 @@ export function useStudyCompanion() {
       })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`push failed: ${res.status}`))))
         .then((data) => {
+          lastSyncedSnapshotRef.current = snapshot;
+          pendingPushRef.current = false;
           setStudyState((prev) => ({ ...prev, syncSavedAt: data.savedAt }));
           setCloudSyncStatus("ok");
           setCloudSyncAt(Date.now());
         })
         .catch((error) => {
           console.warn("Cloud sync push failed", error);
-          setCloudSyncStatus("error");
+          setCloudSyncStatus("error"); // pendingPushRef stays true — still unsynced
         });
     }, 5000);
     return () => clearTimeout(timer);
@@ -2062,19 +2085,66 @@ export function useStudyCompanion() {
 
   // ── Cloud sync actions ────────────────────────────────────────────────────
 
-  async function initSync(): Promise<string> {
+  // Pull the cloud copy and adopt it if it's newer than what we have. Reads
+  // from studyStateRef so it's safe to call from a once-registered listener.
+  async function pullFromCloud(): Promise<"updated" | "current" | "error" | "no-sync"> {
+    const s = studyStateRef.current;
+    if (!s.syncCode) return "no-sync";
     setCloudSyncStatus("syncing");
-    const baseUrl = studyState.backendBaseUrl;
-    const res = await fetch(`${baseUrl}/api/sync/init`, {
+    try {
+      const res = await fetch(`${s.backendBaseUrl}/api/sync/pull/${s.syncCode}`);
+      if (!res.ok) throw new Error(`pull failed: ${res.status}`);
+      const data = await res.json();
+      if (data.state && data.savedAt > (s.syncSavedAt || 0)) {
+        const merged = normalizeState({ ...data.state, syncCode: s.syncCode, syncSavedAt: data.savedAt });
+        lastSyncedSnapshotRef.current = syncSnapshot(merged);
+        pendingPushRef.current = false;
+        setStudyState(merged);
+        setCloudSyncStatus("ok");
+        setCloudSyncAt(Date.now());
+        return "updated";
+      }
+      setCloudSyncStatus("ok");
+      setCloudSyncAt(Date.now());
+      return "current";
+    } catch (error) {
+      console.warn("Cloud sync pull failed", error);
+      setCloudSyncStatus("error");
+      return "error";
+    }
+  }
+
+  // Manual "Sync now": if this device has unsynced edits, push them first (so
+  // they aren't lost); otherwise pull the latest from the cloud.
+  async function syncNow(): Promise<"updated" | "current" | "pushed" | "error" | "no-sync"> {
+    const s = studyStateRef.current;
+    if (!s.syncCode) return "no-sync";
+    if (pendingPushRef.current) {
+      try {
+        await forcePush();
+        return "pushed";
+      } catch {
+        return "error";
+      }
+    }
+    return pullFromCloud();
+  }
+
+  async function initSync(): Promise<string> {
+    const s = studyStateRef.current;
+    setCloudSyncStatus("syncing");
+    const res = await fetch(`${s.backendBaseUrl}/api/sync/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state: studyState }),
+      body: JSON.stringify({ state: s }),
     });
     if (!res.ok) {
       setCloudSyncStatus("error");
       throw new Error(`initSync failed: ${res.status}`);
     }
     const data = await res.json();
+    lastSyncedSnapshotRef.current = syncSnapshot(s);
+    pendingPushRef.current = false;
     setStudyState((prev) => ({ ...prev, syncCode: data.syncCode, syncSavedAt: data.savedAt }));
     setCloudSyncStatus("ok");
     setCloudSyncAt(Date.now());
@@ -2085,7 +2155,7 @@ export function useStudyCompanion() {
     const trimmed = code.trim().toUpperCase();
     if (!trimmed) throw new Error("Enter a sync code first.");
     setCloudSyncStatus("syncing");
-    const baseUrl = studyState.backendBaseUrl;
+    const baseUrl = studyStateRef.current.backendBaseUrl;
     const res = await fetch(`${baseUrl}/api/sync/pull/${trimmed}`);
     if (res.status === 404) {
       setCloudSyncStatus("error");
@@ -2097,31 +2167,37 @@ export function useStudyCompanion() {
     }
     const data = await res.json();
     const merged = normalizeState({ ...(data.state || {}), syncCode: trimmed, syncSavedAt: data.savedAt });
+    lastSyncedSnapshotRef.current = syncSnapshot(merged);
+    pendingPushRef.current = false;
     setStudyState(merged);
     setCloudSyncStatus("ok");
     setCloudSyncAt(Date.now());
   }
 
   function unlinkSync() {
+    pendingPushRef.current = false;
+    lastSyncedSnapshotRef.current = "";
     setStudyState((prev) => ({ ...prev, syncCode: "", syncSavedAt: 0 }));
     setCloudSyncStatus("idle");
     setCloudSyncAt(0);
   }
 
   async function forcePush(): Promise<void> {
-    if (!studyState.syncCode) return;
+    const s = studyStateRef.current;
+    if (!s.syncCode) return;
     setCloudSyncStatus("syncing");
-    const baseUrl = studyState.backendBaseUrl;
-    const res = await fetch(`${baseUrl}/api/sync/push`, {
+    const res = await fetch(`${s.backendBaseUrl}/api/sync/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ syncCode: studyState.syncCode, state: studyState }),
+      body: JSON.stringify({ syncCode: s.syncCode, state: s }),
     });
     if (!res.ok) {
       setCloudSyncStatus("error");
       throw new Error(`forcePush failed: ${res.status}`);
     }
     const data = await res.json();
+    lastSyncedSnapshotRef.current = syncSnapshot(s);
+    pendingPushRef.current = false;
     setStudyState((prev) => ({ ...prev, syncSavedAt: data.savedAt }));
     setCloudSyncStatus("ok");
     setCloudSyncAt(Date.now());
@@ -2233,5 +2309,6 @@ export function useStudyCompanion() {
     joinSync,
     unlinkSync,
     forcePush,
+    syncNow,
   };
 }

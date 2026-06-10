@@ -27,6 +27,7 @@ export function CloudSyncCard({
   onJoin,
   onUnlink,
   onForcePush,
+  onSyncNow,
 }: {
   syncCode: string;
   syncStatus: SyncStatus;
@@ -35,6 +36,7 @@ export function CloudSyncCard({
   onJoin: (code: string) => Promise<void>;
   onUnlink: () => void;
   onForcePush: () => Promise<void>;
+  onSyncNow: () => Promise<"updated" | "current" | "pushed" | "error" | "no-sync">;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [joinCode, setJoinCode] = useState("");
@@ -72,6 +74,19 @@ export function CloudSyncCard({
     ]);
   }
 
+  async function handleSyncNow() {
+    try {
+      setBusy(true);
+      const result = await onSyncNow();
+      if (result === "updated") Alert.alert("Updated", "Pulled the latest data from your other device.");
+      else if (result === "current") Alert.alert("Up to date", "This device already has the latest data.");
+      else if (result === "pushed") Alert.alert("Saved", "This device had unsynced changes — pushed them to the cloud.");
+      else if (result === "error") Alert.alert("Sync failed", "Couldn't reach the cloud. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleForcePush() {
     try {
       setBusy(true);
@@ -106,6 +121,12 @@ export function CloudSyncCard({
         <View style={styles.body}>
           {syncCode ? (
             <>
+              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void handleSyncNow()} disabled={busy}>
+                <Ionicons name="sync-outline" size={16} color="#fff" />
+                <Text style={styles.btnPrimaryText}>Sync now</Text>
+              </Pressable>
+              <Text style={styles.hint}>Pulls the latest from your other devices. Tap this after editing on the iPad to bring changes here without restarting.</Text>
+
               <Text style={styles.label}>Your sync code</Text>
               <View style={styles.codeBox}>
                 <Text style={styles.codeText}>{syncCode}</Text>
