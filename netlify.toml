@@ -1,5 +1,5 @@
 [build]
-  command = "npx expo export -p web"
+  command = "npx expo export -p web && node scripts/inject-web-icons.mjs"
   publish = "dist"
 
 [build.environment]
