@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme";
+import { confirmAction, notify } from "../utils/dialog";
 
 type SyncStatus = "idle" | "syncing" | "ok" | "error";
 
@@ -46,9 +47,9 @@ export function CloudSyncCard({
     try {
       setBusy(true);
       const code = await onInit();
-      Alert.alert("Sync started", `Your sync code is:\n\n${code}\n\nEnter this exact code on your other devices to share this data.`);
+      notify("Sync started", `Your sync code is:\n\n${code}\n\nEnter this exact code on your other devices to share this data.`);
     } catch (error) {
-      Alert.alert("Couldn't start sync", error instanceof Error ? error.message : "Try again in a moment.");
+      notify("Couldn't start sync", error instanceof Error ? error.message : "Try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -59,29 +60,32 @@ export function CloudSyncCard({
       setBusy(true);
       await onJoin(joinCode);
       setJoinCode("");
-      Alert.alert("Connected", "This device now shares the synced data. It pulled the latest copy.");
+      notify("Connected", "This device now shares the synced data. It pulled the latest copy.");
     } catch (error) {
-      Alert.alert("Couldn't connect", error instanceof Error ? error.message : "Check the code and try again.");
+      notify("Couldn't connect", error instanceof Error ? error.message : "Check the code and try again.");
     } finally {
       setBusy(false);
     }
   }
 
   function handleUnlink() {
-    Alert.alert("Stop syncing?", "This device will keep its data but stop sharing changes. Your cloud copy is untouched.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Stop sync", style: "destructive", onPress: onUnlink },
-    ]);
+    confirmAction({
+      title: "Stop syncing?",
+      message: "This device will keep its data but stop sharing changes. Your cloud copy is untouched.",
+      confirmLabel: "Stop sync",
+      destructive: true,
+      onConfirm: onUnlink,
+    });
   }
 
   async function handleSyncNow() {
     try {
       setBusy(true);
       const result = await onSyncNow();
-      if (result === "updated") Alert.alert("Updated", "Pulled the latest data from your other device.");
-      else if (result === "current") Alert.alert("Up to date", "This device already has the latest data.");
-      else if (result === "pushed") Alert.alert("Saved", "This device had unsynced changes — pushed them to the cloud.");
-      else if (result === "error") Alert.alert("Sync failed", "Couldn't reach the cloud. Check your connection and try again.");
+      if (result === "updated") notify("Updated", "Pulled the latest data from your other device.");
+      else if (result === "current") notify("Up to date", "This device already has the latest data.");
+      else if (result === "pushed") notify("Saved", "This device had unsynced changes — pushed them to the cloud.");
+      else if (result === "error") notify("Sync failed", "Couldn't reach the cloud. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -91,9 +95,9 @@ export function CloudSyncCard({
     try {
       setBusy(true);
       await onForcePush();
-      Alert.alert("Pushed", "This device's data is now the latest cloud copy.");
+      notify("Pushed", "This device's data is now the latest cloud copy.");
     } catch (error) {
-      Alert.alert("Push failed", error instanceof Error ? error.message : "Try again in a moment.");
+      notify("Push failed", error instanceof Error ? error.message : "Try again in a moment.");
     } finally {
       setBusy(false);
     }
