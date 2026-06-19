@@ -46,6 +46,20 @@ const EMPTY_COVERAGE: TopicCoverage = {
   untestedTopics: [],
 };
 
+// LOS command verbs + generic filler that carry no topical meaning. Stripping
+// these from a topic before matching means a practiced question is judged on
+// the concept words ("present value", "perpetuity") rather than boilerplate
+// ("calculate and interpret the ..."), which is what actually identifies a topic.
+const TOPIC_STOPWORDS = new Set([
+  "calculate", "interpret", "describe", "explain", "identify", "determine", "define",
+  "compare", "contrast", "demonstrate", "evaluate", "analyze", "analyse", "discuss",
+  "distinguish", "illustrate", "recommend", "justify", "formulate", "construct",
+  "estimate", "derive", "compute", "apply", "using", "use", "used", "given", "versus",
+  "including", "various", "different", "types", "type", "concept", "concepts",
+  "the", "and", "for", "with", "from", "that", "this", "their", "its", "into", "over",
+  "between", "among", "how", "why", "what", "when", "such", "these", "those", "based",
+]);
+
 function tokenize(text: string) {
   return String(text || "")
     .toLowerCase()
@@ -54,11 +68,19 @@ function tokenize(text: string) {
     .filter((token) => token.length > 2);
 }
 
+function contentTokens(text: string) {
+  return tokenize(text).filter((token) => !TOPIC_STOPWORDS.has(token));
+}
+
+// A practiced question "covers" a topic if it shares a couple of the topic's
+// distinctive concept words. Long LOS statements need only ~2 content-word hits
+// (not half of every word), so actually practicing a topic now marks it.
 function attemptMatchesTopic(topic: string, haystack: string) {
-  const topicTokens = tokenize(topic);
+  const topicTokens = contentTokens(topic);
   if (!topicTokens.length) return false;
   const matched = topicTokens.filter((token) => haystack.includes(token));
-  return matched.length >= Math.max(1, Math.ceil(topicTokens.length * 0.5));
+  const need = Math.min(2, Math.max(1, Math.ceil(topicTokens.length * 0.4)));
+  return matched.length >= need;
 }
 
 // Builds a durable topic-mastery view for a chapter using the persistent coverage log.

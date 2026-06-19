@@ -726,6 +726,8 @@ app.post("/api/generate-practice-set", async (req, res) => {
         "Return strict JSON only with this shape: " +
         '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
         "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
+        "In the explanation, refer to choices by their content, never by letter or position (do not write 'option B' or 'the second choice'), because the app reorders the options. " +
+        "Also set each question's 'tags' to the specific concept(s)/topic(s) it tests, using short labels that match the supplied focusTopics or coverageChecklist wording when applicable. " +
         "Follow the supplied difficultyGuidance exactly when deciding how hard to make the questions. " +
         "Set every question's 'difficulty' field to the supplied targetDifficulty value. " +
         "Stay faithful to the supplied source and do not invent formulas or facts that are not supported by the material. " +
@@ -769,12 +771,23 @@ app.post("/api/generate-practice-set", async (req, res) => {
     }
 
     // Guarantee the difficulty the app stores matches what the user asked for,
-    // regardless of what the model echoed back.
+    // regardless of what the model echoed back. Also shuffle each question's
+    // options: models bias the correct choice toward B/C, and the app checks
+    // correctness by matching the answer TEXT (not the letter), so randomizing
+    // the order removes that positional tell without affecting grading.
     structured.practiceSet.difficulty = resolvedDifficulty.label;
-    structured.practiceSet.questions = structured.practiceSet.questions.map((question) => ({
-      ...question,
-      difficulty: resolvedDifficulty.label,
-    }));
+    structured.practiceSet.questions = structured.practiceSet.questions.map((question) => {
+      const options = Array.isArray(question.options) ? [...question.options] : [];
+      for (let i = options.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [options[i], options[j]] = [options[j], options[i]];
+      }
+      return {
+        ...question,
+        options,
+        difficulty: resolvedDifficulty.label,
+      };
+    });
 
     res.json({
       ok: true,
