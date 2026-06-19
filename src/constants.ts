@@ -2,6 +2,10 @@ import { AppTab, FlashcardType, MistakeType, SessionType, WeakTag } from "./type
 
 export const STORAGE_KEY = "cfa-study-companion-mobile-v2";
 
+// Bump this on every deploy so you can verify on-device that the update landed
+// (shown small at the bottom of the Overview tab). Format: version · date.
+export const APP_VERSION = "1.2.0 · 2026-06-19";
+
 export const WEAK_TAG_OPTIONS: WeakTag[] = [
   "Concept weak",
   "Formula weak",

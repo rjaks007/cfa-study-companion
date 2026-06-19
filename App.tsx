@@ -4,7 +4,7 @@ import { ActivityIndicator, Keyboard, KeyboardAvoidingView, PanResponder, Platfo
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { CloudSyncCard } from "./src/components/CloudSyncCard";
 import { MetricCard } from "./src/components/ui";
-import { TABS } from "./src/constants";
+import { APP_VERSION, TABS } from "./src/constants";
 import { useStudyCompanion } from "./src/hooks/useStudyCompanion";
 import { OverviewScreen } from "./src/screens/OverviewScreen";
 import { PracticeScreen } from "./src/screens/PracticeScreen";
@@ -286,6 +286,9 @@ export default function App() {
                 onSyncNow={study.syncNow}
               />
             ) : null}
+            {activeTab === "overview" ? (
+              <Text style={styles.versionText}>v{APP_VERSION}</Text>
+            ) : null}
 
             {activeTab === "weekly" ? (
               <WeeklyPlanScreen
@@ -537,6 +540,14 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     gap: 10,
+  },
+  versionText: {
+    textAlign: "center",
+    fontSize: 11,
+    color: colors.inkSoft,
+    opacity: 0.7,
+    marginTop: 4,
+    marginBottom: 4,
   },
   syncFab: {
     position: "absolute",
