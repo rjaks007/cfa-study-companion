@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
 import { buildTopicCoverage } from "../utils/coverage";
+import { notify } from "../utils/dialog";
 
 type PracticeSection = "generate" | "saved" | "review" | "assistant" | "cards";
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -215,6 +216,10 @@ export function PracticeScreen({
   const [cardIndex, setCardIndex] = useState(0);
   const [cardFlipped, setCardFlipped] = useState(false);
   const [reviewContext, setReviewContext] = useState<{ subject: Subject; chapterTitle: string } | null>(null);
+  // A review quiz was launched for this chapter but not yet generated — the user
+  // configures count/difficulty/mode and runs it; generating then still counts as
+  // the review session (settles the schedule) and targets their weak topics.
+  const [reviewArmed, setReviewArmed] = useState<{ subject: Subject; chapterTitle: string; focusTopics: string[] } | null>(null);
   const [reviewScheduled, setReviewScheduled] = useState(false);
   const handledReviewNonce = useRef("");
 
@@ -264,9 +269,10 @@ export function PracticeScreen({
     return () => clearInterval(timer);
   }, [currentSetId, submitted]);
 
-  // When a review quiz is launched from the Overview screen, auto-start it once.
-  // We clear the request after handling so it can't re-fire when this screen
-  // remounts (a stale nonce would otherwise hijack the section on the next mount).
+  // When a review quiz is launched from Overview/Weekly, land the user in the
+  // Generate section pre-aimed at this chapter and its weak spots — but let them
+  // set count/difficulty/mode and run it themselves (it stays a review session).
+  // We clear the request after handling so it can't re-fire on remount.
   useEffect(() => {
     const nonce = reviewRequest?.nonce;
     const subject = reviewRequest?.subject;
@@ -274,10 +280,22 @@ export function PracticeScreen({
     if (!nonce || !subject || !chapterTitle) return;
     if (handledReviewNonce.current === nonce) return;
     handledReviewNonce.current = nonce;
+    const upload = uploads.find((item) => item.subject === subject);
+    const parsed = upload?.parsedChapters.find((chapter) => chapter.readingTitle === chapterTitle);
     setSelectedSubject(subject);
+    if (parsed) setSelectedChapter(chapterTitle);
     setActiveSection("generate");
     setPracticeMode("test");
-    void startReviewQuiz(subject, chapterTitle);
+    setDifficulty("2");
+    setShowSetOptions(true);
+    setReviewContext(null);
+    setReviewScheduled(false);
+    if (upload && parsed) {
+      setReviewArmed({ subject, chapterTitle, focusTopics: buildReviewFocusTopics(upload, chapterTitle) });
+    } else {
+      setReviewArmed(null);
+      notify("Pick the chapter", `I couldn't match "${chapterTitle}" to your synced material for ${subject}. Open the chapter below and tap Create practice set.`);
+    }
     onConsumeReview?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewRequest?.nonce]);
@@ -356,7 +374,7 @@ export function PracticeScreen({
       (card) => card.topic === subject && (card.readingTitle || "General") === chapterTitle && !card.suspended && (!card.nextReview || card.nextReview <= today),
     );
     if (!due.length) {
-      Alert.alert("All caught up", `No cards are due in ${chapterTitle} right now.`);
+      notify("All caught up", `No cards are due in ${chapterTitle} right now.`);
       return;
     }
     beginCardSession(due);
@@ -414,36 +432,45 @@ export function PracticeScreen({
     try {
       await pickPdf(subject, type);
     } catch {
-      Alert.alert("Picker failed", "I could not open the document picker on this device.");
+      notify("Picker failed", "I could not open the document picker on this device.");
     }
   }
 
   async function handleSync(subject: Subject) {
     try {
       await syncSubjectWithAi(subject);
-      Alert.alert("AI sync complete", `${subject} is ready for generated practice sets now.`);
+      notify("AI sync complete", `${subject} is ready for generated practice sets now.`);
     } catch (error) {
-      Alert.alert("AI sync failed", error instanceof Error ? error.message : "The backend sync did not complete.");
+      notify("AI sync failed", error instanceof Error ? error.message : "The backend sync did not complete.");
     }
   }
 
   async function handleGeneratePractice(options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[]; count?: number }) {
     if (!selectedSubject || !selectedChapter) return;
-    // A manual generate is not a review session.
-    setReviewContext(null);
+    // If a review quiz was armed for this exact chapter, this generate IS the
+    // review session: keep the review context (so submit settles the schedule)
+    // and default to targeting the chapter's weak spots. Otherwise it's a plain
+    // manual set and not a review.
+    const isArmedReview = Boolean(reviewArmed && reviewArmed.subject === selectedSubject && reviewArmed.chapterTitle === selectedChapter);
+    if (isArmedReview) {
+      setReviewContext({ subject: selectedSubject, chapterTitle: selectedChapter });
+    } else {
+      setReviewContext(null);
+    }
     setReviewScheduled(false);
     try {
       setGenerating(true);
       await generatePracticeSet(selectedSubject, selectedChapter, options?.count || Number(questionCount || 10), difficulty, {
-        mode: options?.mode,
-        focusTopics: options?.focusTopics,
+        mode: options?.mode || (isArmedReview ? "review-focus" : undefined),
+        focusTopics: options?.focusTopics || (isArmedReview ? reviewArmed?.focusTopics : undefined),
         baseQuestions: options?.baseQuestions,
       });
       setActiveSection("generate");
       setHighlightedQuestionId("");
-      Alert.alert("Practice set ready", "Your new question set is ready below.");
+      if (isArmedReview) setReviewArmed(null);
+      notify("Practice set ready", "Your new question set is ready below.");
     } catch (error) {
-      Alert.alert("Generation failed", error instanceof Error ? error.message : "The practice set could not be created.");
+      notify("Generation failed", error instanceof Error ? error.message : "The practice set could not be created.");
     } finally {
       setGenerating(false);
     }
@@ -465,7 +492,7 @@ export function PracticeScreen({
     const parsed = upload?.parsedChapters.find((chapter) => chapter.readingTitle === chapterTitle);
     if (!upload || !parsed) {
       setReviewContext(null);
-      Alert.alert(
+      notify(
         "Pick the chapter",
         `I couldn't match "${chapterTitle}" to your synced material for ${subject}. Open the chapter below and tap Create practice set.`,
       );
@@ -485,7 +512,7 @@ export function PracticeScreen({
       setHighlightedQuestionId("");
     } catch (error) {
       setReviewContext(null);
-      Alert.alert("Couldn't start review", error instanceof Error ? error.message : "The review quiz could not be created.");
+      notify("Couldn't start review", error instanceof Error ? error.message : "The review quiz could not be created.");
     } finally {
       setGenerating(false);
     }
@@ -505,9 +532,9 @@ export function PracticeScreen({
       setAnalyzing(true);
       await analyzeGeneratedPractice(selectedSubject);
       setActiveSection("review");
-      Alert.alert("Review ready", "Your weak-topic summary and study examples are ready below.");
+      notify("Review ready", "Your weak-topic summary and study examples are ready below.");
     } catch (error) {
-      Alert.alert("Analysis failed", error instanceof Error ? error.message : "The practice review could not be created.");
+      notify("Analysis failed", error instanceof Error ? error.message : "The practice review could not be created.");
     } finally {
       setAnalyzing(false);
     }
@@ -532,7 +559,7 @@ export function PracticeScreen({
       );
       setAssistantMessages((prev) => [...prev, { role: "assistant", content: result.answer }]);
     } catch (error) {
-      Alert.alert("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
+      notify("Assistant failed", error instanceof Error ? error.message : "The assistant could not answer right now.");
     } finally {
       setAssistantLoading(false);
     }
@@ -560,9 +587,9 @@ export function PracticeScreen({
     try {
       setMakingCards(true);
       const count = await generateChapterFlashcards(selectedSubject, selectedChapter);
-      Alert.alert("Flashcards ready", `Added ${count} cards for ${selectedChapter}.`);
+      notify("Flashcards ready", `Added ${count} cards for ${selectedChapter}.`);
     } catch (error) {
-      Alert.alert("Couldn't make cards", error instanceof Error ? error.message : "Flashcard generation failed.");
+      notify("Couldn't make cards", error instanceof Error ? error.message : "Flashcard generation failed.");
     } finally {
       setMakingCards(false);
     }
@@ -585,7 +612,7 @@ export function PracticeScreen({
   function beginCardSession(cards: Flashcard[]) {
     const queue = cards.slice(0, 15);
     if (!queue.length) {
-      Alert.alert("All caught up", "No cards are due right now.");
+      notify("All caught up", "No cards are due right now.");
       return;
     }
     setCardQueue(queue);
@@ -614,7 +641,7 @@ export function PracticeScreen({
   function handleSaveCurrentSet() {
     if (!selectedSubject || !activeUpload?.generatedSet) return;
     saveCurrentPracticeSet(selectedSubject);
-    Alert.alert("Saved", "This practice set is now in Saved sets.");
+    notify("Saved", "This practice set is now in Saved sets.");
   }
 
   function handleBookmarkQuestion(question: PracticeQuestion) {
@@ -624,7 +651,7 @@ export function PracticeScreen({
       chapterTitle: selectedChapter,
       difficulty,
     });
-    Alert.alert("Saved", "Question added to your saved questions.");
+    notify("Saved", "Question added to your saved questions.");
   }
 
   function jumpBackToQuestion() {
@@ -651,6 +678,23 @@ export function PracticeScreen({
 
       {activeSection === "generate" ? (
         <>
+          {reviewArmed && reviewArmed.subject === selectedSubject && reviewArmed.chapterTitle === selectedChapter ? (
+            <View style={styles.reviewArmedCard}>
+              <Text style={styles.reviewArmedTitle}>Review quiz · {reviewArmed.chapterTitle}</Text>
+              <Text style={styles.reviewArmedMeta}>Set your questions, difficulty and mode below, then Create — it targets your weak spots and counts as this review. Or:</Text>
+              <Pressable
+                style={styles.reviewArmedButton}
+                onPress={() => {
+                  const armed = reviewArmed;
+                  setReviewArmed(null);
+                  void startReviewQuiz(armed.subject, armed.chapterTitle);
+                }}
+              >
+                <Ionicons name="flash-outline" size={15} color={colors.surface} />
+                <Text style={styles.reviewArmedButtonText}>Use recommended set</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <Panel title="Generate practice set" icon="create-outline">
             {parsedSubjects.length ? (
               <>
@@ -754,15 +798,28 @@ export function PracticeScreen({
                           </Pressable>
                         </View>
                         {showCoverageTopics ? (
-                          <View style={styles.badgeWrap}>
-                            {chapterCoverage.topics.map((entry) => (
-                              <Badge
-                                key={entry.topic}
-                                text={entry.topic}
-                                tone={entry.status === "solid" ? "success" : entry.status === "weak" ? "warning" : "neutral"}
-                              />
-                            ))}
-                          </View>
+                          <>
+                            <Text style={styles.coverageHint}>Tap a topic to drill just that one.</Text>
+                            <View style={styles.badgeWrap}>
+                              {chapterCoverage.topics.map((entry) => (
+                                <Pressable
+                                  key={entry.topic}
+                                  onPress={() =>
+                                    void handleGeneratePractice({
+                                      mode: entry.status === "weak" ? "weak-topics-retry" : "review-focus",
+                                      focusTopics: [entry.topic],
+                                      count: 5,
+                                    })
+                                  }
+                                >
+                                  <Badge
+                                    text={entry.topic}
+                                    tone={entry.status === "solid" ? "success" : entry.status === "weak" ? "warning" : "neutral"}
+                                  />
+                                </Pressable>
+                              ))}
+                            </View>
+                          </>
                         ) : null}
                       </View>
                     ) : null}
@@ -1695,6 +1752,45 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  coverageHint: {
+    fontSize: 11,
+    color: colors.inkSoft,
+    marginBottom: 6,
+  },
+  reviewArmedCard: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: 14,
+    marginBottom: 12,
+    gap: 8,
+  },
+  reviewArmedTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.ink,
+  },
+  reviewArmedMeta: {
+    fontSize: 12,
+    color: colors.inkSoft,
+    lineHeight: 17,
+  },
+  reviewArmedButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  reviewArmedButtonText: {
+    color: colors.surface,
+    fontWeight: "700",
+    fontSize: 13,
   },
   questionCard: {
     backgroundColor: colors.surfaceMuted,
