@@ -741,6 +741,7 @@ app.post("/api/generate-practice-set", async (req, res) => {
         "If mode is 'similar-questions', generate near-neighbor reinforcement questions around the supplied mistakes. " +
         "If mode is 'weak-topics-retry', focus heavily on the supplied focusTopics. " +
         "If mode is 'review-focus', build a SHORT high-yield retention check: select the topics most likely to be tested on the real CFA Level I exam for this reading, give extra weight to the supplied focusTopics (the candidate's weak areas), and use your own CFA expertise to judge what is high-yield — but stay strictly within the supplied syllabus and official learning outcomes, and never introduce outside-syllabus facts. Spread the questions across the most important learning outcomes rather than clustering on one. " +
+        "VERIFY EACH QUESTION BEFORE INCLUDING IT: actually work the question yourself; confirm that exactly one option is unambiguously correct, that every other option is clearly wrong (no second defensible answer, no 'both/none' trap unless intended), that the 'answer' field is copied verbatim from that correct option, that any numbers/units/formulas compute correctly, and that the explanation justifies the correct option and is consistent with it. If a question fails any check, fix it or replace it with a correct one. Only output questions you have verified to be correct and unambiguous. " +
         "Do not use markdown or extra text.",
       userText: JSON.stringify({
         subject,
