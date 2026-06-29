@@ -5,7 +5,7 @@ import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from ".
 import { colors } from "../theme";
 import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
 import { buildTopicCoverage } from "../utils/coverage";
-import { notify } from "../utils/dialog";
+import { confirmAction, notify } from "../utils/dialog";
 
 type PracticeSection = "generate" | "saved" | "review" | "assistant" | "cards";
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -134,6 +134,7 @@ export function PracticeScreen({
   addChapterCard,
   reviewChapterCard,
   deleteFlashcard,
+  clearAllFlashcards,
   dailyCardsRequest,
 }: {
   uploads: UploadRecord[];
@@ -184,6 +185,7 @@ export function PracticeScreen({
   addChapterCard: (subject: Subject, chapterTitle: string, front: string, back: string, cardType?: Flashcard["cardType"]) => void;
   reviewChapterCard: (cardId: string, rating: FlashcardRating) => void;
   deleteFlashcard: (cardId: string) => void;
+  clearAllFlashcards: () => void;
   dailyCardsRequest?: { nonce?: string };
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
@@ -1365,6 +1367,21 @@ export function PracticeScreen({
                 </View>
               );
             })}
+            <Pressable
+              style={styles.clearCardsRow}
+              onPress={() =>
+                confirmAction({
+                  title: "Clear all flashcards?",
+                  message: `This deletes all ${cardLibrary.total} cards across every subject so you can start fresh. This cannot be undone.`,
+                  confirmLabel: "Clear all",
+                  destructive: true,
+                  onConfirm: clearAllFlashcards,
+                })
+              }
+            >
+              <Ionicons name="trash-outline" size={14} color={colors.danger} />
+              <Text style={styles.clearCardsText}>Clear all cards & start fresh</Text>
+            </Pressable>
           </Panel>
         ) : null}
         <Panel title="Flashcards" icon="albums-outline">
@@ -1757,6 +1774,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.inkSoft,
     marginBottom: 6,
+  },
+  clearCardsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  clearCardsText: {
+    fontSize: 12,
+    color: colors.danger,
+    fontWeight: "600",
   },
   reviewArmedCard: {
     backgroundColor: colors.primarySoft,

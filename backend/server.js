@@ -645,18 +645,20 @@ app.post("/api/generate-flashcards", async (req, res) => {
 
     const response = await runClaude({
       model: MODELS.chat,
-      maxTokens: 4000,
+      maxTokens: 6000,
       forceJson: true,
       system:
-        "You create CFA Level I study flashcards from the supplied chapter material. " +
+        "You create CFA Level I active-recall flashcards from the supplied chapter material. " +
         'Return strict JSON only: {"flashcards":[{"front":"","back":"","cardType":"Formula"}]}. ' +
-        "cardType must be one of: Formula, Concept, Application, Trap. " +
-        "Put ALL the key formulas FIRST as Formula cards — front = the name and when to use it, back = the formula written plainly plus a one-line note. " +
-        "Then add the highest-yield Concept, Application and Trap cards. " +
-        "Front is a short question or cue; back is a concise, exam-useful answer. Mention BA II Plus usage on the back when it helps. " +
-        "Keep the deck LEAN — only the must-know items. Aim for 6 to 12 cards total: every essential formula, plus only the few highest-yield concepts and traps. Do not pad with trivia or near-duplicates. " +
-        "Base everything strictly on the supplied material and do not invent. " +
-        "If existingCards are supplied, do NOT duplicate or lightly paraphrase any of them — only add genuinely new must-know items the existing deck does not already cover. If nothing important is left, return fewer cards. " +
+        "cardType must be one of: Formula, Concept, Definition, Trap. " +
+        "CORE RULE — ONE idea per card (atomic). Each card tests exactly one fact, formula, definition, or distinction. If a topic has several facts, make several separate cards. Never put a list of multiple facts on one back; that makes self-grading meaningless. " +
+        "FRONT must be a clear question with ONE unambiguous correct answer (e.g. 'What is the formula for the future value of an ordinary annuity?' or 'What does a higher duration imply about a bond's price sensitivity?'). Never a vague cue or a topic name. You may use a fill-in-the-blank (cloze) front for a definition or a key term, with the blank as ____. " +
+        "BACK is the minimal answer only — just enough to be correct and complete for that one idea, no padding. " +
+        "Formula cards: put every essential formula FIRST. Front asks for the formula by name/scenario. Back = the formula, then define each symbol in one short line each, then a one-line 'use when', and a tiny worked number ONLY when it genuinely aids memory. Mention BA II Plus keystrokes when they realistically help. " +
+        "Definition cards: precise one-line definitions of key terms. Concept cards: one cause-effect or relationship each. Trap cards: one common exam mistake and the correct view. " +
+        "VERIFY EACH CARD before including it: confirm the answer/formula/definition is factually correct and unambiguous, that symbols are defined, and that the front has exactly one right answer. Fix or drop any card that fails. Base everything strictly on the supplied material and do not invent facts. " +
+        "Keep the deck LEAN — only must-know items. Aim for 6 to 14 atomic cards: every essential formula (each its own card), plus the highest-yield definitions, concepts and traps. No trivia, no near-duplicates. " +
+        "If existingCards are supplied, do NOT duplicate or lightly paraphrase any of them — only add genuinely new must-know items. If nothing important is left, return fewer cards. " +
         "Do not use markdown.",
       userText: JSON.stringify({ subject, chapterTitle, chapter, existingCards: existingFronts }),
     });

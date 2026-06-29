@@ -4,7 +4,7 @@ export const STORAGE_KEY = "cfa-study-companion-mobile-v2";
 
 // Bump this on every deploy so you can verify on-device that the update landed
 // (shown small at the bottom of the Overview tab). Format: version · date.
-export const APP_VERSION = "1.3.0 · 2026-06-28";
+export const APP_VERSION = "1.4.0 · 2026-06-28";
 
 export const WEAK_TAG_OPTIONS: WeakTag[] = [
   "Concept weak",
@@ -18,7 +18,7 @@ export const WEAK_TAG_OPTIONS: WeakTag[] = [
 ];
 
 export const SESSION_TYPES: SessionType[] = ["Reading", "Practice Questions", "Revision", "Mock", "Flashcards"];
-export const CARD_TYPES: FlashcardType[] = ["Concept", "Formula", "Application", "Trap"];
+export const CARD_TYPES: FlashcardType[] = ["Concept", "Formula", "Definition", "Trap"];
 export const MISTAKE_TYPES: MistakeType[] = [
   "Concept weak",
   "Formula weak",

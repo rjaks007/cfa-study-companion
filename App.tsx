@@ -357,6 +357,7 @@ export default function App() {
                   addChapterCard={study.addChapterCard}
                   reviewChapterCard={study.reviewChapterCard}
                   deleteFlashcard={study.deleteFlashcard}
+                  clearAllFlashcards={study.clearAllFlashcards}
                   dailyCardsRequest={dailyCardsRequest}
                   onRequestFocusBottomField={scrollPracticeBottomIntoView}
                   targetSubject={practiceTarget.subject}

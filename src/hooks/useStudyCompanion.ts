@@ -439,7 +439,9 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
   });
 
   const sessions = Array.isArray(value.sessions) ? value.sessions : [];
-  const cards = Array.isArray(value.cards) && value.cards.length ? value.cards : starterCards();
+  // Seed starter cards only when no deck was ever saved. An explicit empty deck
+  // (the user cleared it to start fresh) must be respected, not re-seeded.
+  const cards = Array.isArray(value.cards) ? value.cards : starterCards();
   const mocks = Array.isArray(value.mocks) && value.mocks.length ? value.mocks : defaultMocks();
   const roadmapOverrides = normalizeRoadmapOverrides(value.roadmapOverrides);
   const hiddenIds = hiddenRoadmapIdSet(roadmapOverrides);
@@ -1346,8 +1348,9 @@ export function useStudyCompanion() {
   function normalizeCardType(value: unknown): FlashcardType {
     const text = String(value || "").toLowerCase();
     if (text.startsWith("form")) return "Formula";
-    if (text.startsWith("app")) return "Application";
+    if (text.startsWith("def")) return "Definition";
     if (text.startsWith("trap")) return "Trap";
+    if (text.startsWith("app")) return "Application";
     return "Concept";
   }
 
@@ -1431,6 +1434,12 @@ export function useStudyCompanion() {
 
   function deleteFlashcard(cardId: string) {
     setStudyState((current) => ({ ...current, cards: current.cards.filter((card) => card.id !== cardId) }));
+  }
+
+  // Wipe the whole flashcard deck for a clean restart (e.g. to regenerate with
+  // an improved generator). Syncs to other devices like any other change.
+  function clearAllFlashcards() {
+    setStudyState((current) => ({ ...current, cards: [] }));
   }
 
   function dismissRemindersPrompt() {
@@ -2337,6 +2346,7 @@ export function useStudyCompanion() {
     addChapterCard,
     reviewChapterCard,
     deleteFlashcard,
+    clearAllFlashcards,
     exportBackup,
     importBackup,
     initSync,
