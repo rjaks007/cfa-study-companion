@@ -7,6 +7,7 @@ import { AppState } from "react-native";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
 import { assignRoadmapWeeks, buildSubjectReading, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
 import {
+  BankQuestion,
   CardDraft,
   ChapterQuestionSummary,
   Flashcard,
@@ -418,6 +419,21 @@ function normalizeUpload(upload: Partial<UploadRecord>, subject: Subject): Uploa
       ? upload.wrongQuestions.map(normalizeSavedQuestion).filter(Boolean) as SavedPracticeQuestion[]
       : [],
     coverageLog: Array.isArray(upload.coverageLog) ? upload.coverageLog : [],
+    questionBank: Array.isArray(upload.questionBank)
+      ? upload.questionBank
+          .filter((q) => q && typeof q.question === "string" && Array.isArray(q.options))
+          .map((q) => ({
+            id: String(q.id || makeId("bankq")),
+            chapterTitle: String(q.chapterTitle || ""),
+            question: String(q.question || ""),
+            options: (q.options || []).map((o: unknown) => String(o)),
+            answer: String(q.answer || ""),
+            explanation: String(q.explanation || ""),
+            difficulty: String(q.difficulty || "exam"),
+            tags: Array.isArray(q.tags) ? q.tags.map((t: unknown) => String(t)) : [],
+            seen: Boolean(q.seen),
+          }))
+      : [],
   };
 }
 
@@ -1920,6 +1936,139 @@ export function useStudyCompanion() {
     }));
   }
 
+  // ── Durable question bank (paste high-quality questions in from Claude) ──────
+
+  // Parse pasted JSON ({questions:[...]}) and add new questions to the subject's
+  // bank, deduped by question text. Returns counts. Reads from the live ref so
+  // we can report added/skipped synchronously.
+  function importQuestionBank(subject: Subject, rawText: string): { added: number; skipped: number } {
+    let parsed: any;
+    try {
+      const match = String(rawText || "").match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      parsed = JSON.parse(match ? match[0] : rawText);
+    } catch {
+      throw new Error("That isn't valid JSON. Paste exactly what the prompt produces.");
+    }
+    const items: any[] = Array.isArray(parsed?.questions) ? parsed.questions : Array.isArray(parsed) ? parsed : [];
+    if (!items.length) throw new Error("No questions found in the pasted text.");
+
+    const upload = studyStateRef.current.uploads.find((item) => item.subject === subject);
+    const existing = new Set((upload?.questionBank || []).map((q) => q.question.trim().toLowerCase()));
+    const newOnes: BankQuestion[] = [];
+    let skipped = 0;
+    items.forEach((item) => {
+      const question = String(item?.question || "").trim();
+      const options = Array.isArray(item?.options) ? item.options.map((o: unknown) => String(o)) : [];
+      const answer = String(item?.answer || "").trim();
+      if (!question || options.length < 2 || !answer) {
+        skipped += 1;
+        return;
+      }
+      const key = question.toLowerCase();
+      if (existing.has(key)) {
+        skipped += 1;
+        return;
+      }
+      existing.add(key);
+      newOnes.push({
+        id: makeId("bankq"),
+        chapterTitle: String(item?.chapter || item?.chapterTitle || "").trim(),
+        question,
+        options,
+        answer,
+        explanation: String(item?.explanation || ""),
+        difficulty: String(item?.difficulty || "exam"),
+        tags: Array.isArray(item?.tags) ? item.tags.map((t: unknown) => String(t)) : [],
+        seen: false,
+      });
+    });
+
+    if (newOnes.length) {
+      setStudyState((current) => ({
+        ...current,
+        uploads: current.uploads.map((up) => (up.subject === subject ? { ...up, questionBank: [...up.questionBank, ...newOnes] } : up)),
+      }));
+    }
+    return { added: newOnes.length, skipped };
+  }
+
+  // Draw `count` questions from the bank (optionally limited to chapters),
+  // preferring unseen ones, shuffle their options, and load them as the active
+  // test set — no API call. Marks the drawn questions as seen.
+  function buildSetFromBank(subject: Subject, opts: { chapterTitles?: string[]; count: number }): number {
+    const upload = studyStateRef.current.uploads.find((item) => item.subject === subject);
+    if (!upload || !upload.questionBank.length) throw new Error("This subject's bank is empty. Import questions first.");
+    let pool = upload.questionBank;
+    if (opts.chapterTitles && opts.chapterTitles.length) {
+      const wanted = new Set(opts.chapterTitles);
+      pool = pool.filter((q) => wanted.has(q.chapterTitle));
+    }
+    if (!pool.length) throw new Error("No banked questions match that selection.");
+
+    const shuffle = <T,>(arr: T[]): T[] => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    const ordered = [...shuffle(pool.filter((q) => !q.seen)), ...shuffle(pool.filter((q) => q.seen))];
+    const chosen = ordered.slice(0, Math.min(opts.count, ordered.length));
+    const chosenIds = new Set(chosen.map((q) => q.id));
+    const onlyChapter = opts.chapterTitles && opts.chapterTitles.length === 1 ? opts.chapterTitles[0] : "";
+
+    const questions: PracticeQuestion[] = chosen.map((q) => ({
+      id: makeId("bankset"),
+      question: q.question,
+      options: shuffle(q.options),
+      answer: q.answer,
+      explanation: q.explanation,
+      difficulty: q.difficulty,
+      tags: q.tags,
+    }));
+
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((up) => {
+        if (up.subject !== subject) return up;
+        return {
+          ...up,
+          questionBank: up.questionBank.map((q) => (chosenIds.has(q.id) ? { ...q, seen: true } : q)),
+          generatedSet: {
+            id: makeId("generated-set"),
+            chapterTitle: onlyChapter || `${subject} · from bank`,
+            questionCount: questions.length,
+            difficulty: "2" as PracticeDifficulty,
+            questions,
+            createdAt: todayISO(),
+          },
+          generatedAnswers: {},
+          generatedReview: null,
+        };
+      }),
+    }));
+    return questions.length;
+  }
+
+  function clearQuestionBank(subject: Subject) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((up) => (up.subject === subject ? { ...up, questionBank: [] } : up)),
+    }));
+  }
+
+  // Reset the seen flags so the whole bank is fresh to draw from again.
+  function resetBankSeen(subject: Subject) {
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((up) =>
+        up.subject === subject ? { ...up, questionBank: up.questionBank.map((q) => ({ ...q, seen: false })) } : up,
+      ),
+    }));
+  }
+
   function deleteSavedPracticeSet(subject: Subject, savedSetId: string) {
     setStudyState((current) => ({
       ...current,
@@ -2347,6 +2496,10 @@ export function useStudyCompanion() {
     reviewChapterCard,
     deleteFlashcard,
     clearAllFlashcards,
+    importQuestionBank,
+    buildSetFromBank,
+    clearQuestionBank,
+    resetBankSeen,
     exportBackup,
     importBackup,
     initSync,

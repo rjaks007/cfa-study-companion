@@ -151,6 +151,13 @@ export interface PracticeQuestion {
   tags: string[];
 }
 
+// A question stored in the durable per-subject question bank (pasted in from
+// Claude). `seen` lets draws prefer unseen questions so the bank stays fresh.
+export interface BankQuestion extends PracticeQuestion {
+  chapterTitle: string;
+  seen: boolean;
+}
+
 export interface PracticeChapter {
   id: string;
   readingTitle: string;
@@ -247,6 +254,7 @@ export interface UploadRecord {
   savedQuestions: SavedPracticeQuestion[];
   wrongQuestions: SavedPracticeQuestion[];
   coverageLog: CoverageAttempt[];
+  questionBank: BankQuestion[];
 }
 
 export interface MockExam {

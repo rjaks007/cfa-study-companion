@@ -318,6 +318,7 @@ export function defaultUploads() {
     savedQuestions: [],
     wrongQuestions: [],
     coverageLog: [],
+    questionBank: [],
   }));
 }
 

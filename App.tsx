@@ -358,6 +358,10 @@ export default function App() {
                   reviewChapterCard={study.reviewChapterCard}
                   deleteFlashcard={study.deleteFlashcard}
                   clearAllFlashcards={study.clearAllFlashcards}
+                  importQuestionBank={study.importQuestionBank}
+                  buildSetFromBank={study.buildSetFromBank}
+                  clearQuestionBank={study.clearQuestionBank}
+                  resetBankSeen={study.resetBankSeen}
                   dailyCardsRequest={dailyCardsRequest}
                   onRequestFocusBottomField={scrollPracticeBottomIntoView}
                   targetSubject={practiceTarget.subject}

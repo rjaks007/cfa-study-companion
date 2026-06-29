@@ -7,7 +7,7 @@ import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Readi
 import { buildTopicCoverage } from "../utils/coverage";
 import { confirmAction, notify } from "../utils/dialog";
 
-type PracticeSection = "generate" | "saved" | "review" | "assistant" | "cards";
+type PracticeSection = "generate" | "bank" | "saved" | "review" | "assistant" | "cards";
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
 const ASSISTANT_FOLLOW_UPS = ["Explain more simply", "Give a numerical example", "What are the common mistakes here?"];
@@ -135,6 +135,10 @@ export function PracticeScreen({
   reviewChapterCard,
   deleteFlashcard,
   clearAllFlashcards,
+  importQuestionBank,
+  buildSetFromBank,
+  clearQuestionBank,
+  resetBankSeen,
   dailyCardsRequest,
 }: {
   uploads: UploadRecord[];
@@ -186,6 +190,10 @@ export function PracticeScreen({
   reviewChapterCard: (cardId: string, rating: FlashcardRating) => void;
   deleteFlashcard: (cardId: string) => void;
   clearAllFlashcards: () => void;
+  importQuestionBank: (subject: Subject, rawText: string) => { added: number; skipped: number };
+  buildSetFromBank: (subject: Subject, opts: { chapterTitles?: string[]; count: number }) => number;
+  clearQuestionBank: (subject: Subject) => void;
+  resetBankSeen: (subject: Subject) => void;
   dailyCardsRequest?: { nonce?: string };
 }) {
   const parsedSubjects = uploads.filter((upload) => upload.parsedChapters.length > 0);
@@ -197,6 +205,9 @@ export function PracticeScreen({
   const [showSubjectPicker, setShowSubjectPicker] = useState(false);
   const [showChapterPicker, setShowChapterPicker] = useState(false);
   const [showSetOptions, setShowSetOptions] = useState(false);
+  const [bankPaste, setBankPaste] = useState("");
+  const [bankCount, setBankCount] = useState("20");
+  const [bankImporting, setBankImporting] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -447,6 +458,57 @@ export function PracticeScreen({
     }
   }
 
+  const bankStats = useMemo(() => {
+    const bank = activeUpload?.questionBank || [];
+    const byChapter = new Map<string, { total: number; unseen: number }>();
+    bank.forEach((q) => {
+      const key = q.chapterTitle || "(unlabeled)";
+      const entry = byChapter.get(key) || { total: 0, unseen: 0 };
+      entry.total += 1;
+      if (!q.seen) entry.unseen += 1;
+      byChapter.set(key, entry);
+    });
+    return {
+      total: bank.length,
+      unseen: bank.filter((q) => !q.seen).length,
+      chapters: Array.from(byChapter.entries()).sort((a, b) => b[1].total - a[1].total),
+    };
+  }, [activeUpload?.questionBank]);
+
+  function handleImportBank() {
+    if (!selectedSubject) {
+      notify("Pick a subject", "Choose a subject first, then paste its questions.");
+      return;
+    }
+    if (!bankPaste.trim()) return;
+    try {
+      setBankImporting(true);
+      const { added, skipped } = importQuestionBank(selectedSubject, bankPaste);
+      setBankPaste("");
+      notify("Imported", `Added ${added} question${added === 1 ? "" : "s"} to ${selectedSubject}'s bank${skipped ? ` (skipped ${skipped} duplicate/invalid).` : "."}`);
+    } catch (error) {
+      notify("Import failed", error instanceof Error ? error.message : "Couldn't import that.");
+    } finally {
+      setBankImporting(false);
+    }
+  }
+
+  function handleBuildFromBank() {
+    if (!selectedSubject) return;
+    try {
+      const n = buildSetFromBank(selectedSubject, { count: Number(bankCount) || 20 });
+      setReviewContext(null);
+      setReviewArmed(null);
+      setSubmitted(false);
+      setGuessed({});
+      setPracticeMode("test");
+      setActiveSection("generate");
+      notify("Set ready", `Built a ${n}-question set from your bank — no API used. Good luck!`);
+    } catch (error) {
+      notify("Couldn't build set", error instanceof Error ? error.message : "Your bank is empty.");
+    }
+  }
+
   async function handleGeneratePractice(options?: { mode?: string; focusTopics?: string[]; baseQuestions?: PracticeQuestion[]; count?: number }) {
     if (!selectedSubject || !selectedChapter) return;
     // If a review quiz was armed for this exact chapter, this generate IS the
@@ -672,6 +734,7 @@ export function PracticeScreen({
     <>
       <View style={styles.sectionSwitch}>
         {sectionButton("generate", "Generate")}
+        {sectionButton("bank", "Bank")}
         {sectionButton("saved", "Saved")}
         {sectionButton("review", "Review")}
         {sectionButton("cards", "Cards")}
@@ -1062,6 +1125,87 @@ export function PracticeScreen({
             ) : null}
           </Panel>
         </>
+      ) : null}
+
+      {activeSection === "bank" ? (
+        <Panel title="Question bank" icon="server-outline">
+          {selectedSubject ? (
+            <>
+              <Text style={styles.copy}>Paste high-quality questions you generated in Claude (free — no API cost), then build sets from them instantly. Tap "Get the prompt" for what to ask Claude.</Text>
+
+              <View style={styles.bankStatRow}>
+                <Text style={styles.bankStatNum}>{bankStats.total}</Text>
+                <Text style={styles.bankStatLabel}>in {selectedSubject}'s bank · {bankStats.unseen} fresh (unseen)</Text>
+              </View>
+              {bankStats.chapters.map(([chapter, stat]) => (
+                <View key={chapter} style={styles.libChapterRow}>
+                  <Text style={styles.libChapterTitle} numberOfLines={1}>{chapter}</Text>
+                  <Text style={styles.libRowMeta}>{stat.unseen}/{stat.total} fresh</Text>
+                </View>
+              ))}
+
+              {bankStats.total ? (
+                <View style={styles.configCard}>
+                  <Text style={styles.cardTitle}>Build a set from the bank</Text>
+                  <Text style={styles.sectionLabel}>How many questions?</Text>
+                  <TextInput
+                    value={bankCount}
+                    onChangeText={setBankCount}
+                    style={uiStyles.input}
+                    keyboardType="number-pad"
+                    placeholder="20"
+                    placeholderTextColor={colors.inkSoft}
+                  />
+                  <ActionButton label="Start set from bank" icon="flash-outline" onPress={handleBuildFromBank} compact />
+                  <Text style={styles.coverageHint}>Draws fresh (unseen) questions first, across all chapters, and shuffles the options. Instant, no API call.</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.sectionLabel}>Paste questions (JSON from Claude)</Text>
+              <TextInput
+                value={bankPaste}
+                onChangeText={setBankPaste}
+                style={[uiStyles.input, styles.bankPasteInput]}
+                placeholder='{"questions":[{"chapter":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"...","tags":["..."],"difficulty":"exam"}]}'
+                placeholderTextColor={colors.inkSoft}
+                multiline
+              />
+              <ActionButton label={bankImporting ? "Importing..." : "Import to bank"} icon="download-outline" onPress={handleImportBank} compact />
+
+              {bankStats.total ? (
+                <View style={styles.bankManageRow}>
+                  <Pressable
+                    onPress={() =>
+                      confirmAction({
+                        title: "Reset fresh status?",
+                        message: "Mark every banked question as unseen again so they can all be drawn.",
+                        confirmLabel: "Reset",
+                        onConfirm: () => selectedSubject && resetBankSeen(selectedSubject),
+                      })
+                    }
+                  >
+                    <Text style={styles.bankManageText}>Reset fresh</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      confirmAction({
+                        title: "Clear this subject's bank?",
+                        message: `Deletes all ${bankStats.total} banked questions for ${selectedSubject}. This cannot be undone.`,
+                        confirmLabel: "Clear",
+                        destructive: true,
+                        onConfirm: () => selectedSubject && clearQuestionBank(selectedSubject),
+                      })
+                    }
+                  >
+                    <Text style={[styles.bankManageText, styles.bankClearText]}>Clear bank</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <EmptyState text="Pick a subject first (Generate tab), then come back to its bank." />
+          )}
+        </Panel>
       ) : null}
 
       {activeSection === "saved" ? (
@@ -1784,6 +1928,42 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  bankStatRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    marginVertical: 8,
+  },
+  bankStatNum: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  bankStatLabel: {
+    fontSize: 12,
+    color: colors.inkSoft,
+    flexShrink: 1,
+  },
+  bankPasteInput: {
+    minHeight: 110,
+    textAlignVertical: "top",
+  },
+  bankManageRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  bankManageText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.inkSoft,
+  },
+  bankClearText: {
+    color: colors.danger,
   },
   clearCardsText: {
     fontSize: 12,
