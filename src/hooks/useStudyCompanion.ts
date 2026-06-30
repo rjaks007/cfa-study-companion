@@ -1942,15 +1942,31 @@ export function useStudyCompanion() {
   // bank, deduped by question text. Returns counts. Reads from the live ref so
   // we can report added/skipped synchronously.
   function importQuestionBank(subject: Subject, rawText: string): { added: number; skipped: number } {
-    let parsed: any;
+    const text = String(rawText || "");
+    let items: any[] = [];
+    // 1) Try a clean parse of the whole JSON object/array.
     try {
-      const match = String(rawText || "").match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      parsed = JSON.parse(match ? match[0] : rawText);
+      const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      const parsed = JSON.parse(match ? match[0] : text);
+      items = Array.isArray(parsed?.questions) ? parsed.questions : Array.isArray(parsed) ? parsed : [];
     } catch {
-      throw new Error("That isn't valid JSON. Paste exactly what the prompt produces.");
+      items = [];
     }
-    const items: any[] = Array.isArray(parsed?.questions) ? parsed.questions : Array.isArray(parsed) ? parsed : [];
-    if (!items.length) throw new Error("No questions found in the pasted text.");
+    // 2) Salvage: if the paste was truncated/messy, pull each flat question
+    //    object on its own. Our question objects contain no nested braces, so a
+    //    {...}-without-inner-braces match cleanly isolates each one.
+    if (!items.length) {
+      const objects = text.match(/\{[^{}]*\}/g) || [];
+      objects.forEach((chunk) => {
+        try {
+          const obj = JSON.parse(chunk);
+          if (obj && typeof obj.question === "string" && Array.isArray(obj.options)) items.push(obj);
+        } catch {
+          // skip unparseable fragment
+        }
+      });
+    }
+    if (!items.length) throw new Error("No questions found in the pasted text. Make sure you copied Claude's JSON output.");
 
     const upload = studyStateRef.current.uploads.find((item) => item.subject === subject);
     const existing = new Set((upload?.questionBank || []).map((q) => q.question.trim().toLowerCase()));
