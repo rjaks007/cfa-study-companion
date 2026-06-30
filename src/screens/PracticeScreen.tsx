@@ -7,7 +7,7 @@ import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Readi
 import { buildTopicCoverage } from "../utils/coverage";
 import { confirmAction, notify } from "../utils/dialog";
 
-type PracticeSection = "generate" | "bank" | "saved" | "review" | "assistant" | "cards";
+type PracticeSection = "generate" | "mock" | "saved" | "review" | "assistant" | "cards";
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
 const ASSISTANT_FOLLOW_UPS = ["Explain more simply", "Give a numerical example", "What are the common mistakes here?"];
@@ -206,8 +206,9 @@ export function PracticeScreen({
   const [showChapterPicker, setShowChapterPicker] = useState(false);
   const [showSetOptions, setShowSetOptions] = useState(false);
   const [bankPaste, setBankPaste] = useState("");
-  const [bankCount, setBankCount] = useState("20");
+  const [mockCount, setMockCount] = useState(20);
   const [bankImporting, setBankImporting] = useState(false);
+  const [showBankSetup, setShowBankSetup] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -496,7 +497,7 @@ export function PracticeScreen({
   function handleBuildFromBank() {
     if (!selectedSubject) return;
     try {
-      const n = buildSetFromBank(selectedSubject, { count: Number(bankCount) || 20 });
+      const n = buildSetFromBank(selectedSubject, { count: mockCount });
       setReviewContext(null);
       setReviewArmed(null);
       setSubmitted(false);
@@ -734,7 +735,7 @@ export function PracticeScreen({
     <>
       <View style={styles.sectionSwitch}>
         {sectionButton("generate", "Generate")}
-        {sectionButton("bank", "Bank")}
+        {sectionButton("mock", "Mock")}
         {sectionButton("saved", "Saved")}
         {sectionButton("review", "Review")}
         {sectionButton("cards", "Cards")}
@@ -1127,83 +1128,98 @@ export function PracticeScreen({
         </>
       ) : null}
 
-      {activeSection === "bank" ? (
-        <Panel title="Question bank" icon="server-outline">
+      {activeSection === "mock" ? (
+        <Panel title="Mock test" icon="timer-outline">
           {selectedSubject ? (
             <>
-              <Text style={styles.copy}>Paste high-quality questions you generated in Claude (free — no API cost), then build sets from them instantly. Tap "Get the prompt" for what to ask Claude.</Text>
-
-              <View style={styles.bankStatRow}>
-                <Text style={styles.bankStatNum}>{bankStats.total}</Text>
-                <Text style={styles.bankStatLabel}>in {selectedSubject}'s bank · {bankStats.unseen} fresh (unseen)</Text>
-              </View>
-              {bankStats.chapters.map(([chapter, stat]) => (
-                <View key={chapter} style={styles.libChapterRow}>
-                  <Text style={styles.libChapterTitle} numberOfLines={1}>{chapter}</Text>
-                  <Text style={styles.libRowMeta}>{stat.unseen}/{stat.total} fresh</Text>
-                </View>
-              ))}
-
               {bankStats.total ? (
-                <View style={styles.configCard}>
-                  <Text style={styles.cardTitle}>Build a set from the bank</Text>
-                  <Text style={styles.sectionLabel}>How many questions?</Text>
+                <View style={styles.deckHero}>
+                  <Text style={styles.deckHeroEmoji}>📝</Text>
+                  <Text style={styles.deckHeroTitle}>{selectedSubject}</Text>
+                  <Text style={styles.deckHeroMeta}>{bankStats.total} questions ready · {bankStats.unseen} still fresh</Text>
+                  <View style={styles.mockSizeRow}>
+                    {[10, 20, 30].map((n) => (
+                      <Pressable
+                        key={n}
+                        style={[styles.levelChip, mockCount === n && styles.levelChipActive]}
+                        onPress={() => setMockCount(n)}
+                      >
+                        <Text style={[styles.levelChipText, mockCount === n && styles.levelChipTextActive]}>{n} Q</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Pressable style={styles.deckStartButton} onPress={handleBuildFromBank}>
+                    <Text style={styles.deckStartText}>Start mock · {mockCount} Q · {Math.round((mockCount * 90) / 60)} min</Text>
+                  </Pressable>
+                  <Text style={styles.coverageHint}>Timed at exam pace (90s/question). Draws fresh questions first and shuffles options.</Text>
+                </View>
+              ) : (
+                <Text style={styles.copy}>No mock questions yet for {selectedSubject}. Generate ~50 in your Claude project and add them once — then take timed mocks here with one tap, free.</Text>
+              )}
+
+              <Pressable style={styles.advancedHeader} onPress={() => setShowBankSetup((v) => !v)}>
+                <Text style={styles.cardTitle}>{bankStats.total ? "Add or manage questions" : "Add questions"}</Text>
+                <Badge text={showBankSetup ? "Hide" : "Show"} tone="accent" />
+              </Pressable>
+
+              {showBankSetup ? (
+                <View style={styles.bankSetup}>
+                  <Text style={styles.coverageHint}>Paste the JSON you generated in Claude. It files each question under its chapter automatically and skips duplicates.</Text>
                   <TextInput
-                    value={bankCount}
-                    onChangeText={setBankCount}
-                    style={uiStyles.input}
-                    keyboardType="number-pad"
-                    placeholder="20"
+                    value={bankPaste}
+                    onChangeText={setBankPaste}
+                    style={[uiStyles.input, styles.bankPasteInput]}
+                    placeholder='{"questions":[ ... ]}'
                     placeholderTextColor={colors.inkSoft}
+                    multiline
                   />
-                  <ActionButton label="Start set from bank" icon="flash-outline" onPress={handleBuildFromBank} compact />
-                  <Text style={styles.coverageHint}>Draws fresh (unseen) questions first, across all chapters, and shuffles the options. Instant, no API call.</Text>
-                </View>
-              ) : null}
+                  <ActionButton label={bankImporting ? "Importing..." : "Import questions"} icon="download-outline" onPress={handleImportBank} compact />
 
-              <Text style={styles.sectionLabel}>Paste questions (JSON from Claude)</Text>
-              <TextInput
-                value={bankPaste}
-                onChangeText={setBankPaste}
-                style={[uiStyles.input, styles.bankPasteInput]}
-                placeholder='{"questions":[{"chapter":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"...","tags":["..."],"difficulty":"exam"}]}'
-                placeholderTextColor={colors.inkSoft}
-                multiline
-              />
-              <ActionButton label={bankImporting ? "Importing..." : "Import to bank"} icon="download-outline" onPress={handleImportBank} compact />
+                  {bankStats.chapters.length ? (
+                    <View style={styles.bankBreakdown}>
+                      {bankStats.chapters.map(([chapter, stat]) => (
+                        <View key={chapter} style={styles.libChapterRow}>
+                          <Text style={styles.libChapterTitle} numberOfLines={1}>{chapter || "(unlabeled)"}</Text>
+                          <Text style={styles.libRowMeta}>{stat.unseen}/{stat.total} fresh</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
 
-              {bankStats.total ? (
-                <View style={styles.bankManageRow}>
-                  <Pressable
-                    onPress={() =>
-                      confirmAction({
-                        title: "Reset fresh status?",
-                        message: "Mark every banked question as unseen again so they can all be drawn.",
-                        confirmLabel: "Reset",
-                        onConfirm: () => selectedSubject && resetBankSeen(selectedSubject),
-                      })
-                    }
-                  >
-                    <Text style={styles.bankManageText}>Reset fresh</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() =>
-                      confirmAction({
-                        title: "Clear this subject's bank?",
-                        message: `Deletes all ${bankStats.total} banked questions for ${selectedSubject}. This cannot be undone.`,
-                        confirmLabel: "Clear",
-                        destructive: true,
-                        onConfirm: () => selectedSubject && clearQuestionBank(selectedSubject),
-                      })
-                    }
-                  >
-                    <Text style={[styles.bankManageText, styles.bankClearText]}>Clear bank</Text>
-                  </Pressable>
+                  {bankStats.total ? (
+                    <View style={styles.bankManageRow}>
+                      <Pressable
+                        onPress={() =>
+                          confirmAction({
+                            title: "Reset fresh status?",
+                            message: "Mark every banked question as unseen again so they can all be drawn.",
+                            confirmLabel: "Reset",
+                            onConfirm: () => selectedSubject && resetBankSeen(selectedSubject),
+                          })
+                        }
+                      >
+                        <Text style={styles.bankManageText}>Reset fresh</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() =>
+                          confirmAction({
+                            title: `Clear ${selectedSubject}'s mock questions?`,
+                            message: `Deletes all ${bankStats.total} questions for ${selectedSubject}. This cannot be undone.`,
+                            confirmLabel: "Clear",
+                            destructive: true,
+                            onConfirm: () => selectedSubject && clearQuestionBank(selectedSubject),
+                          })
+                        }
+                      >
+                        <Text style={[styles.bankManageText, styles.bankClearText]}>Clear all</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
             </>
           ) : (
-            <EmptyState text="Pick a subject first (Generate tab), then come back to its bank." />
+            <EmptyState text="Pick a subject first (Generate tab), then come back to Mock." />
           )}
         </Panel>
       ) : null}
@@ -1948,6 +1964,19 @@ const styles = StyleSheet.create({
   bankPasteInput: {
     minHeight: 110,
     textAlignVertical: "top",
+  },
+  mockSizeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  bankSetup: {
+    marginTop: 10,
+    gap: 10,
+  },
+  bankBreakdown: {
+    marginTop: 4,
   },
   bankManageRow: {
     flexDirection: "row",
