@@ -137,6 +137,7 @@ export function PracticeScreen({
   clearAllFlashcards,
   importQuestionBank,
   buildSetFromBank,
+  buildCombinedMock,
   clearQuestionBank,
   resetBankSeen,
   dailyCardsRequest,
@@ -192,6 +193,7 @@ export function PracticeScreen({
   clearAllFlashcards: () => void;
   importQuestionBank: (subject: Subject, rawText: string) => { added: number; skipped: number };
   buildSetFromBank: (subject: Subject, opts: { chapterTitles?: string[]; count: number }) => number;
+  buildCombinedMock: (subjects: Subject[], totalCount: number) => { hostSubject: Subject; count: number };
   clearQuestionBank: (subject: Subject) => void;
   resetBankSeen: (subject: Subject) => void;
   dailyCardsRequest?: { nonce?: string };
@@ -209,6 +211,8 @@ export function PracticeScreen({
   const [mockCount, setMockCount] = useState(20);
   const [bankImporting, setBankImporting] = useState(false);
   const [showBankSetup, setShowBankSetup] = useState(false);
+  const [combineMode, setCombineMode] = useState(false);
+  const [combineSubjects, setCombineSubjects] = useState<Subject[]>([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -491,6 +495,28 @@ export function PracticeScreen({
       notify("Import failed", error instanceof Error ? error.message : "Couldn't import that.");
     } finally {
       setBankImporting(false);
+    }
+  }
+
+  const bankedSubjects = useMemo(() => uploads.filter((u) => u.questionBank.length).map((u) => u.subject), [uploads]);
+
+  function handleCombinedMock() {
+    if (!combineSubjects.length) {
+      notify("Pick subjects", "Select at least one subject to combine.");
+      return;
+    }
+    try {
+      const { hostSubject, count } = buildCombinedMock(combineSubjects, mockCount);
+      setSelectedSubject(hostSubject);
+      setReviewContext(null);
+      setReviewArmed(null);
+      setSubmitted(false);
+      setGuessed({});
+      setPracticeMode("test");
+      setActiveSection("generate");
+      notify("Mock ready", `Built a ${count}-question mock across ${combineSubjects.length} subjects — exam pace, no API used. Good luck!`);
+    } catch (error) {
+      notify("Couldn't build mock", error instanceof Error ? error.message : "Add questions to those subjects first.");
     }
   }
 
@@ -1132,6 +1158,50 @@ export function PracticeScreen({
         <Panel title="Mock test" icon="timer-outline">
           {selectedSubject ? (
             <>
+              <View style={styles.mockModeRow}>
+                <Pressable style={[styles.mockModeChip, !combineMode && styles.mockModeChipActive]} onPress={() => setCombineMode(false)}>
+                  <Text style={[styles.mockModeText, !combineMode && styles.mockModeTextActive]}>This subject</Text>
+                </Pressable>
+                <Pressable style={[styles.mockModeChip, combineMode && styles.mockModeChipActive]} onPress={() => setCombineMode(true)}>
+                  <Text style={[styles.mockModeText, combineMode && styles.mockModeTextActive]}>Combine subjects</Text>
+                </Pressable>
+              </View>
+              {combineMode ? (
+                <View style={styles.deckHero}>
+                  <Text style={styles.deckHeroEmoji}>🧪</Text>
+                  <Text style={styles.deckHeroTitle}>Full mock</Text>
+                  <Text style={styles.deckHeroMeta}>{bankedSubjects.length} subject{bankedSubjects.length === 1 ? "" : "s"} with questions</Text>
+                  {bankedSubjects.length ? (
+                    <>
+                      <View style={styles.combineList}>
+                        {bankedSubjects.map((s) => {
+                          const on = combineSubjects.includes(s);
+                          return (
+                            <Pressable key={s} style={[styles.combineChip, on && styles.combineChipOn]} onPress={() => setCombineSubjects((cur) => (on ? cur.filter((x) => x !== s) : [...cur, s]))}>
+                              <Ionicons name={on ? "checkbox" : "square-outline"} size={15} color={on ? colors.surface : colors.inkSoft} />
+                              <Text style={[styles.combineChipText, on && styles.combineChipTextOn]} numberOfLines={1}>{s}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <View style={styles.mockSizeRow}>
+                        {[30, 60, 90].map((n) => (
+                          <Pressable key={n} style={[styles.levelChip, mockCount === n && styles.levelChipActive]} onPress={() => setMockCount(n)}>
+                            <Text style={[styles.levelChipText, mockCount === n && styles.levelChipTextActive]}>{n} Q</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Pressable style={[styles.deckStartButton, !combineSubjects.length && styles.deckStartButtonMuted]} onPress={handleCombinedMock}>
+                        <Text style={styles.deckStartText}>Start mock · {mockCount} Q · {Math.round((mockCount * 90) / 60)} min</Text>
+                      </Pressable>
+                      <Text style={styles.coverageHint}>Weighted by exam importance, mixed across the subjects you tick, timed at 90s/question.</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.coverageHint}>Add questions to at least one subject first (switch to "This subject" → Add questions).</Text>
+                  )}
+                </View>
+              ) : (
+                <>
               {bankStats.total ? (
                 <View style={styles.deckHero}>
                   <Text style={styles.deckHeroEmoji}>📝</Text>
@@ -1217,6 +1287,8 @@ export function PracticeScreen({
                   ) : null}
                 </View>
               ) : null}
+                </>
+              )}
             </>
           ) : (
             <EmptyState text="Pick a subject first (Generate tab), then come back to Mock." />
@@ -1970,6 +2042,64 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
     marginBottom: 12,
+  },
+  mockModeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  mockModeChip: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  mockModeChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  mockModeText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.ink,
+  },
+  mockModeTextActive: {
+    color: colors.surface,
+  },
+  combineList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+  },
+  combineChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    maxWidth: 220,
+  },
+  combineChipOn: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  combineChipText: {
+    fontSize: 12,
+    color: colors.ink,
+    flexShrink: 1,
+  },
+  combineChipTextOn: {
+    color: colors.surface,
+    fontWeight: "600",
   },
   bankSetup: {
     marginTop: 10,

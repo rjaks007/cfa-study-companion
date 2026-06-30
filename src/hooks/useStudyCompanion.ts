@@ -30,7 +30,7 @@ import {
 } from "../types";
 import { requestReviewNotificationPermission, scheduleReviewNotifications } from "../utils/notifications";
 import { addDays, calculateCardUpdate, diffDays, makeId, nextReviewFromScore, reviewIntervalDays, todayISO } from "../utils/study";
-import { buildTopicCoverage } from "../utils/coverage";
+import { buildTopicCoverage, SUBJECT_WEIGHT } from "../utils/coverage";
 import { buildChapterQuestionSummary, deriveMistakeKey, emptyQuestionProgress, generateExamTip, generateFlashcardsFromReading, generateFormulaTemplate, generateMemoryTip, generateMindMapTemplate, generateSummaryTemplate } from "../utils/templates";
 
 function parseStructuredAiOutput(content: string) {
@@ -2075,6 +2075,78 @@ export function useStudyCompanion() {
     }));
   }
 
+  // Build one combined mock across several subjects, weighted by exam weight,
+  // fresh-first within each subject, options + order shuffled. Each question is
+  // tagged with its subject (tags[0]) for a per-subject score breakdown. Hosted
+  // on the first contributing subject so the existing test UI renders it.
+  function buildCombinedMock(subjects: Subject[], totalCount: number): { hostSubject: Subject; count: number } {
+    const chosen = subjects.filter((s, i) => subjects.indexOf(s) === i);
+    const banks = chosen
+      .map((s) => ({ subject: s, upload: studyStateRef.current.uploads.find((u) => u.subject === s) }))
+      .filter((b) => b.upload && b.upload.questionBank.length) as { subject: Subject; upload: UploadRecord }[];
+    if (!banks.length) throw new Error("None of the selected subjects have questions yet.");
+
+    const shuffle = <T,>(arr: T[]): T[] => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    const weights = banks.map((b) => SUBJECT_WEIGHT[b.subject] ?? 5);
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    const seenBySubject = new Map<Subject, Set<string>>();
+    const picked: Array<{ subject: Subject; q: BankQuestion }> = [];
+    banks.forEach((b, i) => {
+      const alloc = Math.max(1, Math.round((weights[i] / totalWeight) * totalCount));
+      const pool = b.upload.questionBank;
+      const ordered = [...shuffle(pool.filter((q) => !q.seen)), ...shuffle(pool.filter((q) => q.seen))];
+      const take = ordered.slice(0, Math.min(alloc, ordered.length));
+      seenBySubject.set(b.subject, new Set(take.map((q) => q.id)));
+      take.forEach((q) => picked.push({ subject: b.subject, q }));
+    });
+    if (!picked.length) throw new Error("Couldn't assemble a mock from the selected subjects.");
+
+    const questions: PracticeQuestion[] = shuffle(picked).map(({ subject, q }) => ({
+      id: makeId("mock"),
+      question: q.question,
+      options: shuffle(q.options),
+      answer: q.answer,
+      explanation: q.explanation,
+      difficulty: q.difficulty,
+      tags: [subject, ...(q.tags || [])],
+    }));
+
+    const hostSubject = banks[0].subject;
+    setStudyState((current) => ({
+      ...current,
+      uploads: current.uploads.map((up) => {
+        const seenSet = seenBySubject.get(up.subject);
+        const questionBank = seenSet && seenSet.size ? up.questionBank.map((q) => (seenSet.has(q.id) ? { ...q, seen: true } : q)) : up.questionBank;
+        if (up.subject === hostSubject) {
+          return {
+            ...up,
+            questionBank,
+            generatedSet: {
+              id: makeId("generated-set"),
+              chapterTitle: `Full mock · ${banks.length} subjects`,
+              questionCount: questions.length,
+              difficulty: "2" as PracticeDifficulty,
+              questions,
+              createdAt: todayISO(),
+            },
+            generatedAnswers: {},
+            generatedReview: null,
+          };
+        }
+        return { ...up, questionBank };
+      }),
+    }));
+    return { hostSubject, count: questions.length };
+  }
+
   // Reset the seen flags so the whole bank is fresh to draw from again.
   function resetBankSeen(subject: Subject) {
     setStudyState((current) => ({
@@ -2514,6 +2586,7 @@ export function useStudyCompanion() {
     clearAllFlashcards,
     importQuestionBank,
     buildSetFromBank,
+    buildCombinedMock,
     clearQuestionBank,
     resetBankSeen,
     exportBackup,

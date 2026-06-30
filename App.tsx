@@ -360,6 +360,7 @@ export default function App() {
                   clearAllFlashcards={study.clearAllFlashcards}
                   importQuestionBank={study.importQuestionBank}
                   buildSetFromBank={study.buildSetFromBank}
+                  buildCombinedMock={study.buildCombinedMock}
                   clearQuestionBank={study.clearQuestionBank}
                   resetBankSeen={study.resetBankSeen}
                   dailyCardsRequest={dailyCardsRequest}
