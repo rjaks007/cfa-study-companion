@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { MISTAKE_TYPES, STORAGE_KEY } from "../constants";
-import { assignRoadmapWeeks, buildSubjectReading, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
+import { assignRoadmapWeeks, buildSubjectReading, buildWeeks, createCardDraft, createInitialState, createSessionDraft, defaultMocks, defaultUploads, PLAN_WEEKS, starterCards, SUBJECT_BLUEPRINT, SUBJECT_ORDER } from "../data/cfa";
 import {
   BankQuestion,
   CardDraft,
@@ -441,7 +441,16 @@ function normalizeState(value: Partial<StoredState> | null | undefined): StoredS
   const base = createInitialState();
   if (!value) return base;
 
-  const readings = value.readings?.length ? value.readings.map(normalizeReading) : base.readings;
+  const storedReadings = value.readings?.length ? value.readings.map(normalizeReading) : base.readings;
+  // Self-heal stale schedules. Earlier builds could assign week numbers past the
+  // end of the plan (e.g. 27-29); buildWeeks then clamps them all into the final
+  // week, piling every remaining subject there. If we see any out-of-range week,
+  // re-run the scheduler so the plan corrects itself on load, on every device.
+  // Study data lives on the reading objects, so nothing is lost.
+  const needsReschedule = storedReadings.some(
+    (reading) => !reading.weekAssigned || reading.weekAssigned < 1 || reading.weekAssigned > PLAN_WEEKS,
+  );
+  const readings = needsReschedule ? assignRoadmapWeeks(storedReadings) : storedReadings;
   const selectedSubject = value.selectedSubject || base.selectedSubject;
   const weeklySelectedSubject = value.weeklySelectedSubject || selectedSubject || base.weeklySelectedSubject;
   const selectedReadingId =
