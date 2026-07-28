@@ -224,55 +224,41 @@ export function buildSubjectReading(subject: Subject, readingNumber: number, tit
   };
 }
 
-// New material must finish inside the coverage phase (weeks 1..COVERAGE_WEEKS);
-// weeks after that are revision and mock weeks, so nothing new is scheduled there.
-export const COVERAGE_WEEKS = 16;
+// The whole plan is one 6-month study runway. Chapters spread evenly across all
+// of it — the user handles revision themselves, so no weeks are reserved.
+export const PLAN_WEEKS = 26;
 
+// Spread the readings, in order, evenly across PLAN_WEEKS — balanced by study
+// hours rather than raw counts, so a week of heavy chapters holds fewer of them.
+// Subjects stay contiguous because reading order is preserved.
 export function assignRoadmapWeeks(readings: Reading[]) {
   const nextReadings = readings.map((reading) => ({ ...reading }));
-  let week = 1;
-  let weekdaySlots = 5;
-  let weekendCapacity = 8;
+  if (!nextReadings.length) return nextReadings;
 
+  const loadOf = (reading: Reading) => reading.estimatedHours || 3;
+  const totalHours = nextReadings.reduce((sum, reading) => sum + loadOf(reading), 0);
+
+  // Place each reading proportionally along the runway using the midpoint of the
+  // hours it occupies. A greedy "fill this week then move on" pass under-fills
+  // early weeks and crams the leftovers into the last one; proportional mapping
+  // cannot pile up at the tail because position is fixed by cumulative progress.
+  let cumulative = 0;
   nextReadings.forEach((reading) => {
-    const load = reading.estimatedHours || 3;
-    if (weekdaySlots <= 0 && weekendCapacity <= 0) {
-      week += 1;
-      weekdaySlots = 5;
-      weekendCapacity = 8;
-    }
-
-    if (load <= 2.2 && weekdaySlots > 0) {
-      reading.weekAssigned = week;
-      weekdaySlots -= 1;
-    } else if (weekdaySlots > 0 && weekendCapacity >= Math.max(2, Math.ceil(load))) {
-      reading.weekAssigned = week;
-      weekdaySlots -= 1;
-      weekendCapacity -= Math.max(1, Math.ceil(load - 1));
-    } else if (weekendCapacity >= Math.ceil(load)) {
-      reading.weekAssigned = week;
-      weekendCapacity -= Math.ceil(load);
-    } else {
-      week += 1;
-      weekdaySlots = 5;
-      weekendCapacity = 8;
-      reading.weekAssigned = week;
-      if (load <= 2.2) weekdaySlots -= 1;
-      else weekendCapacity -= Math.ceil(load);
-    }
+    const load = loadOf(reading);
+    const midpoint = cumulative + load / 2;
+    const week = Math.floor((midpoint / totalHours) * PLAN_WEEKS) + 1;
+    reading.weekAssigned = Math.min(PLAN_WEEKS, Math.max(1, week));
+    cumulative += load;
   });
 
-  // The capacity pass above can overflow past the coverage phase (it did: 70
-  // chapters spilled to week 29, and buildWeeks then clamped them all into the
-  // last week, making it impossible). Rescale proportionally so the same order
-  // is spread evenly across weeks 1..COVERAGE_WEEKS instead of piling up.
-  const lastWeek = nextReadings.reduce((max, reading) => Math.max(max, reading.weekAssigned || 1), 1);
-  if (lastWeek > COVERAGE_WEEKS) {
-    nextReadings.forEach((reading) => {
-      const scaled = Math.ceil((reading.weekAssigned / lastWeek) * COVERAGE_WEEKS);
-      reading.weekAssigned = Math.min(COVERAGE_WEEKS, Math.max(1, scaled));
-    });
-  }
+  // Keep weeks monotonic and leave no week empty while a later one has several,
+  // so the plan reads as a steady progression.
+  let previous = 1;
+  nextReadings.forEach((reading) => {
+    if (reading.weekAssigned < previous) reading.weekAssigned = previous;
+    if (reading.weekAssigned > previous + 1) reading.weekAssigned = previous + 1;
+    previous = reading.weekAssigned;
+  });
 
   return nextReadings;
 }
@@ -283,30 +269,19 @@ export function buildWeeks(
     includeReading?: (reading: Reading) => boolean;
   },
 ) {
-  const weeks: WeekPlan[] = Array.from({ length: 26 }, (_, index) => ({
+  // Every week is a study week — chapters run the full 6 months and revision is
+  // handled by the user, so no weeks are reserved for a revision/mock phase.
+  const weeks: WeekPlan[] = Array.from({ length: PLAN_WEEKS }, (_, index) => ({
     week: index + 1,
     readings: [],
-    type: index < 16 ? "Coverage" : index < 21 ? "Revision" : "Mock & Final Review",
+    type: "Coverage",
   }));
 
   readings.forEach((reading) => {
     if (options?.includeReading && !options.includeReading(reading)) return;
-    // Clamp into the coverage phase, not the final week: dumping every overflow
-    // reading into week 26 (a mock/review week) is what made that week impossible.
-    const position = Math.min(COVERAGE_WEEKS - 1, Math.max(0, reading.weekAssigned - 1));
+    const position = Math.min(PLAN_WEEKS - 1, Math.max(0, reading.weekAssigned - 1));
     weeks[position].readings.push(reading.id);
   });
-
-  weeks[16].revisionFocus = ["Quantitative Methods", "Financial Statement Analysis"];
-  weeks[17].revisionFocus = ["Fixed Income", "Derivatives"];
-  weeks[18].revisionFocus = ["Corporate Finance", "Equity Investments"];
-  weeks[19].revisionFocus = ["Portfolio Management", "Economics"];
-  weeks[20].revisionFocus = ["Alternative Investments", "Ethics"];
-  weeks[21].revisionFocus = ["Mock Exam 1", "Weak Areas Review"];
-  weeks[22].revisionFocus = ["Mock Exam 2", "Weak Areas Review"];
-  weeks[23].revisionFocus = ["Mock Exam 3", "Formula Revision"];
-  weeks[24].revisionFocus = ["Ethics Final Revision", "High-Yield Questions"];
-  weeks[25].revisionFocus = ["Final Review", "Rest + Light Revision"];
 
   return weeks;
 }
