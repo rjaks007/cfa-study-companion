@@ -224,6 +224,10 @@ export function buildSubjectReading(subject: Subject, readingNumber: number, tit
   };
 }
 
+// New material must finish inside the coverage phase (weeks 1..COVERAGE_WEEKS);
+// weeks after that are revision and mock weeks, so nothing new is scheduled there.
+export const COVERAGE_WEEKS = 16;
+
 export function assignRoadmapWeeks(readings: Reading[]) {
   const nextReadings = readings.map((reading) => ({ ...reading }));
   let week = 1;
@@ -258,6 +262,18 @@ export function assignRoadmapWeeks(readings: Reading[]) {
     }
   });
 
+  // The capacity pass above can overflow past the coverage phase (it did: 70
+  // chapters spilled to week 29, and buildWeeks then clamped them all into the
+  // last week, making it impossible). Rescale proportionally so the same order
+  // is spread evenly across weeks 1..COVERAGE_WEEKS instead of piling up.
+  const lastWeek = nextReadings.reduce((max, reading) => Math.max(max, reading.weekAssigned || 1), 1);
+  if (lastWeek > COVERAGE_WEEKS) {
+    nextReadings.forEach((reading) => {
+      const scaled = Math.ceil((reading.weekAssigned / lastWeek) * COVERAGE_WEEKS);
+      reading.weekAssigned = Math.min(COVERAGE_WEEKS, Math.max(1, scaled));
+    });
+  }
+
   return nextReadings;
 }
 
@@ -275,7 +291,9 @@ export function buildWeeks(
 
   readings.forEach((reading) => {
     if (options?.includeReading && !options.includeReading(reading)) return;
-    const position = Math.min(25, Math.max(0, reading.weekAssigned - 1));
+    // Clamp into the coverage phase, not the final week: dumping every overflow
+    // reading into week 26 (a mock/review week) is what made that week impossible.
+    const position = Math.min(COVERAGE_WEEKS - 1, Math.max(0, reading.weekAssigned - 1));
     weeks[position].readings.push(reading.id);
   });
 
