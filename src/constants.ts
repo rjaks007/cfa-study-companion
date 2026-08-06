@@ -4,7 +4,7 @@ export const STORAGE_KEY = "cfa-study-companion-mobile-v2";
 
 // Bump this on every deploy so you can verify on-device that the update landed
 // (shown small at the bottom of the Overview tab). Format: version · date.
-export const APP_VERSION = "1.6.3 · 2026-06-28";
+export const APP_VERSION = "1.6.4 · 2026-06-28";
 
 export const WEAK_TAG_OPTIONS: WeakTag[] = [
   "Concept weak",

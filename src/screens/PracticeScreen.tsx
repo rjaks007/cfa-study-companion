@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActionButton, Badge, EmptyState, Panel, ProgressBar, uiStyles } from "../components/ui";
 import { colors } from "../theme";
 import { Flashcard, FlashcardRating, PracticeDifficulty, PracticeQuestion, Reading, Subject, UploadRecord } from "../types";
@@ -1235,6 +1235,10 @@ export function PracticeScreen({
               {showBankSetup ? (
                 <View style={styles.bankSetup}>
                   <Text style={styles.coverageHint}>Paste the JSON you generated in Claude. It files each question under its chapter automatically and skips duplicates.</Text>
+                  <Pressable style={styles.openClaudeButton} onPress={() => void Linking.openURL("https://claude.ai/new")}>
+                    <Ionicons name="open-outline" size={15} color={colors.primary} />
+                    <Text style={styles.openClaudeText}>Open Claude</Text>
+                  </Pressable>
                   <TextInput
                     value={bankPaste}
                     onChangeText={setBankPaste}
@@ -2104,6 +2108,23 @@ const styles = StyleSheet.create({
   bankSetup: {
     marginTop: 10,
     gap: 10,
+  },
+  openClaudeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  openClaudeText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.primary,
   },
   bankBreakdown: {
     marginTop: 4,
