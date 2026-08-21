@@ -124,6 +124,11 @@ function parseStructuredOutput(text) {
   }
 }
 
+// Phrases that mean the model corrected itself mid-explanation. When these show
+// up, the answer key it committed to earlier is no longer trustworthy.
+const SELF_CORRECTION_RE =
+  /\b(i (?:made|apologi[sz])|my (?:earlier|previous|initial|first) (?:calculation|answer|working)|correction\s*:|recalculat|re-?comput|actually,? the (?:correct|right) answer|on second thought|error in (?:my|the) calculation|revised answer|scratch that|let me correct|oops|wait,)/i;
+
 function normalizeLooseText(value) {
   return String(value || "")
     .toLowerCase()
@@ -726,8 +731,12 @@ app.post("/api/generate-practice-set", async (req, res) => {
         "Generate fresh multiple-choice questions grounded in the supplied chapter notes, revision focus, key subtopics, formulas, common traps, question patterns, calculator guidance, and example questions. " +
         "When those structured fields are empty, treat the chapter's notesExcerpt and questionExcerpt as the authoritative source material and base the questions on them. " +
         "Return strict JSON only with this shape: " +
-        '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
+        '{"practiceSet":{"chapterTitle":"","questionCount":0,"difficulty":"exam","questions":[{"id":"","question":"","work":"","options":[],"answer":"","explanation":"","difficulty":"","tags":[]}]}}. ' +
         "Each question must have exactly four options, one correct answer copied exactly from the options array, and a short explanation. " +
+        "ORDER OF WORK — this matters for numerical questions. For each question, FIRST write your full step-by-step calculation in the 'work' field and reach a final value. THEN build the options around that verified value, THEN set 'answer' to the exact option text matching it, THEN write the explanation. Never write the options or answer before finishing the work. " +
+        "The 'work' field is scratch space that the student never sees — put all checking, re-checking and corrections there. " +
+        "The 'explanation' must present only the clean, final, correct reasoning. NEVER mention a mistake, correction, recalculation, or a revised answer in the explanation (no 'I made an error', 'actually the correct answer is', 'correction:'). If while working you find your first attempt was wrong, silently fix 'answer' and the options — the explanation must read as if you got it right the first time. " +
+        "The 'answer' field MUST be character-for-character identical to one of the strings in 'options'. " +
         "In the explanation, refer to choices by their content, never by letter or position (do not write 'option B' or 'the second choice'), because the app reorders the options. " +
         "Also set each question's 'tags' to the specific concept(s)/topic(s) it tests, using short labels that match the supplied focusTopics or coverageChecklist wording when applicable. " +
         "Follow the supplied difficultyGuidance exactly when deciding how hard to make the questions. " +
@@ -773,24 +782,83 @@ app.post("/api/generate-practice-set", async (req, res) => {
       });
     }
 
-    // Guarantee the difficulty the app stores matches what the user asked for,
-    // regardless of what the model echoed back. Also shuffle each question's
-    // options: models bias the correct choice toward B/C, and the app checks
-    // correctness by matching the answer TEXT (not the letter), so randomizing
-    // the order removes that positional tell without affecting grading.
+    // Integrity pass. The model sometimes miscalculates, notices mid-explanation,
+    // and narrates the correction ("actually the correct answer is X") while
+    // leaving the answer key wrong — so the app marks the right choice wrong.
+    // Prompting alone can't guarantee this away, so we enforce it here:
+    // repair when the intended answer is unambiguous, otherwise drop the question
+    // rather than ship a wrong key. Also strips the private 'work' scratch field.
     structured.practiceSet.difficulty = resolvedDifficulty.label;
-    structured.practiceSet.questions = structured.practiceSet.questions.map((question) => {
-      const options = Array.isArray(question.options) ? [...question.options] : [];
-      for (let i = options.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [options[i], options[j]] = [options[j], options[i]];
+
+    const dropped = [];
+    const cleanedQuestions = [];
+
+    structured.practiceSet.questions.forEach((question, index) => {
+      const { work: _work, ...rest } = question;
+      const options = Array.isArray(rest.options) ? rest.options.map((option) => String(option)) : [];
+      const explanation = String(rest.explanation || "");
+      let answer = String(rest.answer || "");
+
+      if (options.length < 2 || !answer) {
+        dropped.push({ index, reason: "missing options or answer" });
+        return;
       }
-      return {
-        ...question,
-        options,
-        difficulty: resolvedDifficulty.label,
-      };
+
+      const matches = (a, b) => normalizeLooseText(a) === normalizeLooseText(b);
+
+      // If the answer key isn't one of the options, try to recover the option it
+      // meant (loose text match); give up if it's still ambiguous.
+      if (!options.some((option) => matches(option, answer))) {
+        const recovered = options.find((option) => {
+          const o = normalizeLooseText(option);
+          const a = normalizeLooseText(answer);
+          return o && a && (o.includes(a) || a.includes(o));
+        });
+        if (!recovered) {
+          dropped.push({ index, reason: "answer not among options" });
+          return;
+        }
+        answer = recovered;
+      } else {
+        answer = options.find((option) => matches(option, answer));
+      }
+
+      // Self-correction narration means the stated key can't be trusted. If the
+      // explanation names a different option as correct, adopt it; else drop.
+      if (SELF_CORRECTION_RE.test(explanation)) {
+        const named = options.filter((option) => explanation.includes(option));
+        if (named.length === 1 && !matches(named[0], answer)) {
+          answer = named[0];
+        } else {
+          dropped.push({ index, reason: "explanation contradicts the answer key" });
+          return;
+        }
+      }
+
+      // Shuffle: models bias the correct choice toward B/C, and grading matches
+      // the answer TEXT, so randomizing position removes the tell safely.
+      const shuffled = [...options];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+
+      cleanedQuestions.push({ ...rest, options: shuffled, answer, difficulty: resolvedDifficulty.label });
     });
+
+    if (dropped.length) {
+      console.warn("[generate-practice-set] dropped questions:", JSON.stringify(dropped));
+    }
+
+    if (!cleanedQuestions.length) {
+      return res.status(500).json({
+        error: "The generated questions didn't pass the answer-key check.",
+        details: "Every question had an inconsistent answer key. Please try generating again.",
+      });
+    }
+
+    structured.practiceSet.questions = cleanedQuestions;
+    structured.practiceSet.questionCount = cleanedQuestions.length;
 
     res.json({
       ok: true,
