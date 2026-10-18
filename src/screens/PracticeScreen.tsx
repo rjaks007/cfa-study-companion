@@ -1115,8 +1115,8 @@ export function PracticeScreen({
                       <Badge text={upload.uploadStatus} tone={upload.uploadStatus === "Parsed with AI" ? "success" : upload.uploadStatus === "AI sync failed" ? "danger" : "neutral"} />
                     </View>
                     <View style={styles.inlineRow}>
-                      <ActionButton label={upload.notesPdfName || "Add notes"} icon="document-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
-                      <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="albums-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
+                      <ActionButton label={upload.notesPdfName || "Add notes"} icon="book-outline" onPress={() => handlePick(upload.subject, "notesPdfName")} compact />
+                      <ActionButton label={upload.questionBankPdfName || "Add Q-bank"} icon="help-circle-outline" onPress={() => handlePick(upload.subject, "questionBankPdfName")} compact />
                       {upload.readyForReview ? (
                         <ActionButton label={syncingSubject === upload.subject ? "Syncing..." : "Sync with AI"} icon="sparkles-outline" onPress={() => void handleSync(upload.subject)} compact />
                       ) : null}
